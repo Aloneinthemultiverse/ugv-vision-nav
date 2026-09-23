@@ -1,48 +1,91 @@
 # ugvnav — vision-based autonomous navigation for UGVs
 
-Monocular perception and hazard resolution for an unmanned ground vehicle
-driving in unstructured outdoor terrain, **without GPS and without LiDAR**.
+**One photograph in. One steering command out.**
+
+Monocular perception, hazard resolution, costmap fusion and planning for an
+unmanned ground vehicle driving in unstructured outdoor terrain — **without GPS
+and without LiDAR**.
 
 Reference implementation for **SIH26126** — *Vision Based Autonomous Navigation
 for Unmanned Ground Vehicle for Outdoor Environment* (Bharat Electronics
-Limited, theme *Smart Automation*, category *Software*).
+Limited · theme *Smart Automation* · category *Software*).
 
 ```
-68 tests · pure NumPy/OpenCV core · CPU only · no ROS required to run or test
+all four layers · 95 tests · pure NumPy/OpenCV core · CPU only · no ROS needed
 ```
+
+---
+
+## What the vehicle actually sees
+
+Every image below is a real run of `scripts/run_pipeline.py` on a real
+photograph. Nothing is drawn by hand, nothing is simulated.
+
+### A forest corridor
+
+![forest corridor](assets/pipeline_scene05.jpg)
+
+Read it left to right, top to bottom:
+
+1. **INPUT** — an ordinary photograph. This is the vehicle's only sensor.
+2. **DEPTH** — Depth Anything V2 recovers the tunnel of trees and the bright
+   opening beyond.
+3. **HEIGHT ABOVE GROUND** — a RANSAC plane is fitted to the drivable surface
+   and every pixel is measured against it. The trail goes dark: it *is* the
+   ground. The canopy goes bright: it is 4 m above us.
+4. **HAZARDS** — forest marked lethal, **the trail and its grass verge left
+   untouched**. The vehicle can see where it is allowed to drive.
+5. **COSTMAP** — the same conclusion, top-down and metric, with obstacles
+   inflated by the vehicle radius. Two tree masses, one gap.
+6. **PLAN** — A\* threads the gap (blue), MPPI evaluates 500 rollouts and picks
+   a trajectory (amber), and the controller emits `v = 0.91 m/s, ω = +0.06 rad/s`.
+   Nearly straight, because the corridor is nearly straight.
+
+### A curving boardwalk
+
+![boardwalk](assets/pipeline_scene03.jpg)
+
+The same pipeline on a path that bends right. The free corridor in the costmap
+bends right with it, and the command becomes `v = 0.31 m/s, ω = −0.46 rad/s` —
+slower and turning, because that is what the terrain demands.
+
+This scene also produced **19 496 pixels of geometry override**: ground that
+segmentation called drivable while the height field disagreed.
+
+### An open track
+
+![open track](assets/pipeline_scene00.jpg)
+
+Wider terrain, 81 pixels flagged as negative obstacles along the rut edges.
 
 ---
 
 ## Why this exists
 
 A camera returns colour. It does not return danger. Five situations defeat
-appearance-based perception outdoors, and each one is capable of destroying a
-vehicle:
+appearance-based perception outdoors, and each one can destroy a vehicle:
 
 | # | Situation | Why appearance fails |
 |---|-----------|----------------------|
 | 1 | Ditches and drop-offs | In a photograph a hole and a shadow look identical |
 | 2 | Moving hazards | One frame cannot say where a rolling rock will be in two seconds |
-| 3 | Rocks buried in dirt | The obstacle is wearing the terrain, so segmentation says "soil" |
+| 3 | Rocks buried in dirt | The obstacle wears the terrain, so segmentation says "soil" |
 | 4 | Low branches | The ground is clear; the cargo deck is not |
 | 5 | Glare and deep shadow | Networks do not go quiet when confused — they stay confident |
 
 `ugvnav` answers all five with **geometry**, and fuses the answers into a single
-safety grid the planner consumes.
+costmap the planner consumes.
 
 ---
 
 ## The central idea: geometry outranks appearance
 
 ```python
-from ugvnav import fuse, geometry_override
+from ugvnav import fuse
 
-# semantics is confident this is drivable grass
-labels = np.full((20, 20), 2, np.uint8)
-
-# but the height field says something is sticking 40 cm out of it
+labels = np.full((20, 20), 2, np.uint8)     # semantics: confident this is grass
 height = np.zeros((20, 20), np.float32)
-height[5:10, 5:10] = 0.4
+height[5:10, 5:10] = 0.4                    # geometry: 40 cm is sticking out of it
 
 result = fuse(labels, height)
 result.grid[7, 7]        # LETHAL — the rock was caught
@@ -51,8 +94,8 @@ result.costmap[7, 7]     # 254, the Nav2 lethal value
 ```
 
 A half-buried boulder is labelled *grass* because that is what its surface looks
-like. Its **shape** gives it away. Where appearance and height disagree,
-height wins. This is the `geometry_override`, and it is the core contribution.
+like. Its **shape** gives it away. Where appearance and height disagree, height
+wins. This is the `geometry_override`, and it is the core contribution.
 
 ---
 
@@ -62,19 +105,19 @@ Information flows one way. Each layer consumes only the layer above it, so any
 component can be disabled and its contribution measured in isolation.
 
 ```
-INPUT      camera · IMU · wheel odometry            (simulated or real ROS topics)
+INPUT      camera · IMU · wheel odometry          (simulated or real ROS topics)
                           ↓
-LAYER 1    A Elevation      B Semantics             perception
+LAYER 1    A Elevation      B Semantics           perception
            C Uncertainty    D Visual odometry
                           ↓
-LAYER 2    E Negative obstacles                     hazard resolution
+LAYER 2    E Negative obstacles                   hazard resolution
            F Dynamic obstacles
            G Voxel / overhead clearance
                           ↓
-LAYER 3    multi-layer costmap fusion               ← the contribution
-           SAFE 0 · CAUTION 128 · LETHAL 254
+LAYER 3    multi-layer costmap fusion             ← the contribution
+           FREE 0 · CAUTION 128 · INSCRIBED 253 · LETHAL 254
                           ↓
-LAYER 4    global planner · local planner · control
+LAYER 4    A* global · MPPI local · pure pursuit  → v, ω
 ```
 
 ### Layer 1 — perception
@@ -82,8 +125,8 @@ LAYER 4    global planner · local planner · control
 | Node | Module | Responsibility |
 |------|--------|----------------|
 | **A** | `layer1.elevation` | RANSAC ground-plane fit → signed height field, rescaled to the known camera mounting height to resolve monocular scale |
-| **B** | `layer1.semantics` | Pixel classes reduced to a 7-word traversability vocabulary |
-| **C** | `layer1.uncertainty` | Augmentation-consistency: run the depth net under perturbations, measure disagreement |
+| **B** | `layer1.semantics` | SegFormer classes reduced to a 7-word traversability vocabulary |
+| **C** | `layer1.uncertainty` | Augmentation consistency: run the depth net under perturbations, measure disagreement |
 | **D** | `layer1.odometry` | ORB + essential matrix visual odometry — **pose without GPS** |
 | — | `layer1.depth` | Monocular depth behind an interface (Depth Anything V2) |
 
@@ -91,52 +134,31 @@ LAYER 4    global planner · local planner · control
 
 | Node | Module | Responsibility |
 |------|--------|----------------|
-| **E** | `layer2.negative_obstacle` | Vertical depth derivative + below-plane deviation → drop-offs, emitted as a per-column *virtual laser scan* |
-| **F** | `layer2.dynamic` | Predicts the flow the vehicle's own motion causes, subtracts it; what still moves is genuinely moving, and gets a velocity vector |
-| **G** | `layer2.voxel` | Sparse 3D occupancy → "is anything solid between the wheels and the roof of this vehicle?" |
+| **E** | `layer2.negative_obstacle` | Vertical depth derivative + below-plane deviation → drop-offs, emitted as a per-column **virtual laser scan** |
+| **F** | `layer2.dynamic` | Predicts the flow the vehicle's own motion causes and subtracts it; what still moves is genuinely moving, and gets a velocity vector |
+| **G** | `layer2.voxel` | Sparse 3D occupancy → *"is anything solid between the wheels and the roof?"* |
 
-### Layer 3 — fusion
+### Layer 3 — costmap fusion
 
-`fusion.fuse()` implements the decision logic in plain NumPy so it runs and is
-testable without ROS. The full system ships the same rules as Nav2
-`costmap_2d` plugins.
+`layer3.costmap.Costmap` is a metric, vehicle-frame grid with Nav2's exact cost
+values. Hazards are written in as layers, then inflated by the robot radius so
+the planner may treat the vehicle as a point.
 
-**The most pessimistic claim wins.** A cell is SAFE only when nothing objected.
-Uncertainty can downgrade SAFE to CAUTION but can never erase a LETHAL —
-there is a regression test for exactly that.
+**The most pessimistic claim wins.** A cell is FREE only when nothing objected.
+Uncertainty can downgrade FREE to CAUTION but can never erase a LETHAL — there
+is a regression test for precisely that.
 
----
+`add_dynamic()` sweeps a tracked obstacle forward along its velocity vector and
+blocks **where it will be**, not where it was. That is the entire point of
+tracking velocity.
 
-## Capabilities today
+### Layer 4 — planning and control
 
-✅ **Implemented and tested**
-
-- Pinhole camera model, depth back-projection, RANSAC ground-plane fitting
-- Metric scale recovery from known camera mounting height
-- Height-above-ground field and top-down elevation rasterisation
-- Negative obstacle detection (two independent cues) + virtual scan output
-- Ego-motion compensated dynamic obstacle detection with velocity tracks
-- Sparse voxel mapping and overhead clearance queries
-- Augmentation-consistency uncertainty estimation
-- Monocular visual odometry with scale injection
-- Full costmap fusion with the geometry override and Nav2 cost values
-
-⚠️ **Runs, not yet tuned on field data**
-
-- Semantic segmentation (SegFormer/ADE20k label mapping is approximate for
-  off-road classes; RUGD or RELLIS-3D fine-tuning is the next step)
-- Depth scale is plausible rather than surveyed
-
-❌ **Not implemented**
-
-- Layer 4: global planner, local planner, controller — the design specifies
-  Nav2 Smac + MPPI, and none of it is written here
-- ROS 2 node wrappers and the `costmap_2d` plugin builds
-- Loop closure / full SLAM back-end (Node D is odometry, not SLAM)
-- Simulator integration and end-to-end navigation runs
-
-Nothing in this repository has driven a vehicle, simulated or real. It is a
-perception and hazard-resolution library with a verified core.
+| Stage | Class | Behaviour |
+|-------|-------|-----------|
+| Global | `AStarPlanner` | Grid A\* that reads *cost*, not occupancy — a CAUTION corridor stays passable but expensive |
+| Local | `MPPIPlanner` | Samples hundreds of control sequences through a unicycle model, scores them against the costmap, returns the cost-weighted average |
+| Control | `PurePursuit` | Regulated pure pursuit, slowing for curvature **and for cost** — which is how the uncertainty layer changes behaviour rather than just colouring a map |
 
 ---
 
@@ -144,64 +166,141 @@ perception and hazard-resolution library with a verified core.
 
 ```bash
 pip install -r requirements.txt
-pytest -q                    # 68 tests, ~1 s, no model download needed
+pytest -q                     # 95 tests, ~2 s, no model download required
 ```
 
 The geometric core has no ML dependency at all. Model-backed nodes sit behind
 interfaces (`StubDepth`, `StubSegmenter`), which is why the whole suite runs in
-about a second on CPU.
+about two seconds on CPU.
+
+Run the full pipeline on any photograph:
+
+```bash
+pip install torch transformers pillow          # first run downloads ~130 MB
+python scripts/run_pipeline.py data/offroad/scene05.jpg assets/out.jpg
+```
+
+```
+scene05.jpg  ->  assets/out.jpg
+  reasons={'semantic_obstacle': 245447, 'geometry_override': 222,
+           'negative_obstacle': 1398}   route=yes   cmd=v=0.91 w=+0.06
+```
+
+Use the library directly:
 
 ```python
-import numpy as np
-from ugvnav import Camera
+from ugvnav import Camera, fuse
 from ugvnav.layer1 import ElevationNetwork, MonocularDepth, to_metric
 from ugvnav.layer2 import NegativeObstacleDetector
+from ugvnav.layer3 import Costmap, GridSpec
+from ugvnav.layer4 import AStarPlanner, PurePursuit
 
 cam   = Camera.from_fov(640, 480, hfov_deg=70, height_m=0.8)
-depth = to_metric(MonocularDepth().infer(rgb))       # downloads weights once
+depth = to_metric(MonocularDepth().infer(rgb))
 elev  = ElevationNetwork(cam).process(depth)
 holes = NegativeObstacleDetector().process(depth, height=elev.height)
 
-holes.ranges      # per-column distance to the nearest drop-off
+cm = Costmap(GridSpec(90, 90, 0.1, -4.5, 0.0))
+cm.add_virtual_scan(holes.ranges, angles)
+cm.inflate()
+
+path = AStarPlanner(cm).plan((0.0, 0.3), (0.0, 6.0))
+cmd  = PurePursuit().step((0.0, 0.3, 0.0), path, costmap=cm)
+cmd.linear, cmd.angular       # metres/second, radians/second
 ```
+
+---
+
+## Dataset
+
+`data/offroad/` holds 14 outdoor scenes — dirt tracks, forest trails, unpaved
+roads and rutted farm tracks — collected from Wikimedia Commons under CC0,
+CC BY and CC BY-SA licences. Per-file titles, licences and source URLs are
+recorded in [`data/offroad/SOURCES.json`](data/offroad/SOURCES.json).
+
+They are deliberately *not* robotics-dataset frames: if the stack only works on
+the images it was tuned against, it does not work.
+
+---
+
+## Capabilities
+
+✅ **Implemented and tested**
+
+- Pinhole camera model, depth back-projection, RANSAC ground-plane fitting
+- Metric scale recovery from known camera mounting height
+- Height-above-ground field and top-down elevation rasterisation
+- Semantic segmentation mapped to a traversability vocabulary
+- Negative obstacle detection (two independent cues) + virtual scan output
+- Ego-motion compensated dynamic detection with velocity tracks
+- Sparse voxel mapping and overhead clearance queries
+- Augmentation-consistency uncertainty estimation
+- Monocular visual odometry with scale injection
+- Multi-layer costmap with Nav2 cost values, inflation, forward sweeping of
+  dynamic obstacles
+- A\* global planning, MPPI local planning, regulated pure pursuit
+- End-to-end pipeline: photograph → `v, ω`
+
+⚠️ **Runs, not yet tuned on field data**
+
+- Segmentation uses ADE20k classes; RUGD or RELLIS-3D fine-tuning is the next
+  step for genuine off-road vocabulary
+- Depth scale is plausible rather than surveyed
+- Nodes F and G are exercised by tests, not yet wired into the single-image
+  pipeline — both need an image *sequence*
+
+❌ **Not implemented**
+
+- ROS 2 node wrappers and `costmap_2d` plugin builds
+- Loop closure / full SLAM back-end (Node D is odometry, not SLAM)
+- Simulator integration and closed-loop navigation runs
+- IMU and wheel-odometry fusion (interfaces exist, filter does not)
+
+**Nothing here has driven a vehicle, simulated or real.** It is a perception,
+fusion and planning library with a verified core and a working single-frame
+pipeline.
 
 ---
 
 ## Testing philosophy
 
 Every geometric component is checked against **exactly-known ground truth**,
-not against its own previous output:
+never against its own previous output:
 
 - Back-projection then projection must be the identity, to 1e-6
-- A synthetic plane at `y = 1.5` must be recovered exactly, and still be
-  recovered with 20 % outliers present
+- A synthetic plane at `y = 1.5` must be recovered exactly, and still recovered
+  with 20 % outliers present
 - Visual odometry must recover a **known** 5° rotation and a known translation
   direction from synthetically projected 3D points
 - Ego-motion compensation must report **zero** moving objects when the entire
-  scene is translated, and must find the object when one patch moves further
-  than the background
+  scene translates, and must find the object when one patch moves further than
+  the background
 - A branch at 1.2 m must block a 1.5 m vehicle and clear a 1.0 m one
+- A\* must thread a gap in a wall, and return empty when the wall is solid
 
 ### Bugs these tests caught
 
-The suite earned its keep immediately — four real defects, all found by tests
-rather than by inspection:
+The suite earned its keep immediately — six real defects, all found by tests or
+by running on real photographs rather than by inspection:
 
 1. **Voxel quantisation.** `1.2 / 0.2` evaluates to `5.999…` in binary floating
    point, so a branch at exactly 1.2 m was filed one voxel too low and a 1.0 m
-   vehicle was reported as blocked. Fixed with an epsilon in the floor.
+   vehicle was wrongly reported as blocked.
 2. **Zero-gradient threshold collapse.** On perfectly flat depth the percentile
    threshold became `0`, and `magnitude >= 0` flagged *every pixel in the image*
    as a drop-off edge.
 3. The same collapse defeated the small-blob filter.
 4. **`clearance_map` point sampling.** It probed one point per cell, so an
-   occupied voxel sitting between sample points was silently missed. It now
-   tests every voxel column overlapping each cell.
-
-There is also an honest known limitation, discovered on real imagery: a naive
-depth gradient fires hardest on the **horizon**, because the sky/ground boundary
-is the strongest depth discontinuity in any outdoor frame. The `valid` mask
-parameter exists for that reason — restrict analysis to the ground region.
+   occupied voxel between sample points was silently missed. It now tests every
+   voxel column overlapping each cell.
+5. **Canopy projected onto the path.** Found on scene03: every lethal pixel was
+   being projected straight down into the ground costmap, so a tree canopy 4 m
+   above the trail walled off the corridor underneath it and no route existed.
+   Only obstruction *within the vehicle's height band* blocks the ground —
+   anything higher is Node G's problem.
+6. **Horizon firing.** A naive depth gradient fires hardest on the sky/ground
+   boundary, because that is the strongest depth discontinuity in any outdoor
+   frame. Hence the `valid` mask parameter.
 
 ---
 
@@ -210,18 +309,20 @@ parameter exists for that reason — restrict analysis to the ground region.
 | Stage | Work | Status |
 |-------|------|--------|
 | 1 | Layer 1 + Layer 2 core, fully tested | **done** |
-| 2 | Fine-tune segmentation on RUGD / RELLIS-3D off-road classes | next |
-| 3 | ROS 2 Humble node wrappers, real topic I/O | planned |
-| 4 | Nav2 `costmap_2d` plugins replacing `fusion.fuse` | planned |
-| 5 | Gazebo worlds with authored ditches, overhangs, moving hazards | planned |
-| 6 | Layer 4 planning: Smac global + MPPI local | planned |
-| 7 | Ablation study — disable one layer, measure collision rate | planned |
+| 2 | Layer 3 costmap + Layer 4 planning and control | **done** |
+| 3 | End-to-end single-frame pipeline on real imagery | **done** |
+| 4 | Sequence pipeline — wire in Nodes F and G, fuse IMU/odometry | next |
+| 5 | Fine-tune segmentation on RUGD / RELLIS-3D off-road classes | next |
+| 6 | ROS 2 Humble node wrappers, real topic I/O | planned |
+| 7 | Nav2 `costmap_2d` plugins replacing the NumPy fusion | planned |
+| 8 | Gazebo worlds with authored ditches, overhangs, moving hazards | planned |
+| 9 | Ablation study — disable one layer, measure collision rate | planned |
 
 ---
 
 ## Licensing
 
-This project is **Apache-2.0**. Dependencies were selected so the result stays
+This project is **Apache-2.0**. Dependencies were chosen so the result stays
 permissively licensed and can be handed over without copyleft obligations —
 which matters for a defence-sector recipient.
 
@@ -242,7 +343,7 @@ No GPL or AGPL component is used anywhere in this stack.
 ```
 ugvnav/
   camera.py              pinhole model, back-projection, RANSAC plane fitting
-  fusion.py              Layer 3 — geometry override and costmap fusion
+  fusion.py              image-space fusion + the geometry override
   layer1/
     depth.py             monocular depth interface + Depth Anything V2
     elevation.py         Node A — ground plane and height field
@@ -253,5 +354,12 @@ ugvnav/
     negative_obstacle.py Node E — ditches and drop-offs
     dynamic.py           Node F — ego-motion compensated tracking
     voxel.py             Node G — 3D occupancy and overhead clearance
-tests/                   68 tests against synthetic ground truth
+  layer3/
+    costmap.py           metric costmap, inflation, dynamic sweeping
+  layer4/
+    planner.py           A*, MPPI, regulated pure pursuit
+scripts/
+  run_pipeline.py        photograph -> six-panel figure -> v, omega
+data/offroad/            14 CC-licensed outdoor scenes + SOURCES.json
+tests/                   95 tests against synthetic ground truth
 ```

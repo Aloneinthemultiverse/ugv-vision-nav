@@ -46,29 +46,44 @@ class Segmenter(Protocol):
 
 
 class SemanticSegmenter:
-    """SegFormer wrapper returning our compact class ids."""
+    """SegFormer wrapper returning our compact class ids.
 
-    def __init__(self, model_id: str = MODEL_ID, device: int = -1) -> None:
-        from transformers import pipeline
+    The published checkpoint ships no ``preprocessor_config.json``, so the
+    image processor is constructed explicitly rather than auto-loaded. Working
+    from the model's own ``id2label`` table also means the ADE20k vocabulary is
+    read from the checkpoint instead of being hard-coded here.
+    """
 
-        self._pipe = pipeline("image-segmentation", model=model_id, device=device)
-        self._model_id = model_id
+    def __init__(self, model_id: str = MODEL_ID, device: str = "cpu") -> None:
+        import torch
+        from transformers import (SegformerForSemanticSegmentation,
+                                  SegformerImageProcessor)
+
+        self._torch = torch
+        self._proc = SegformerImageProcessor(do_resize=True, size={"height": 512,
+                                                                  "width": 512})
+        self._model = SegformerForSemanticSegmentation.from_pretrained(model_id)
+        self._model.eval().to(device)
+        self._device = device
+        self._lut = {int(i): _name_to_class(str(n))
+                     for i, n in self._model.config.id2label.items()}
 
     def infer(self, rgb: np.ndarray) -> np.ndarray:
         import cv2
-        from PIL import Image
 
         rgb = np.asarray(rgb, dtype=np.uint8)
-        out = self._pipe(Image.fromarray(rgb))
-        labels = np.zeros(rgb.shape[:2], dtype=np.uint8)
-        # The pipeline returns one binary mask per detected label.
-        for item in out:
-            mask = np.asarray(item["mask"], dtype=np.uint8)
-            if mask.shape != labels.shape:
-                mask = cv2.resize(mask, (labels.shape[1], labels.shape[0]),
-                                  interpolation=cv2.INTER_NEAREST)
-            labels[mask > 127] = _name_to_class(str(item.get("label", "")))
-        return labels
+        inputs = self._proc(images=rgb, return_tensors="pt").to(self._device)
+        with self._torch.no_grad():
+            logits = self._model(**inputs).logits           # (1, C, h, w)
+        ade = logits.argmax(dim=1)[0].cpu().numpy().astype(np.int32)
+        ade = cv2.resize(ade, (rgb.shape[1], rgb.shape[0]),
+                         interpolation=cv2.INTER_NEAREST)
+
+        out = np.zeros(ade.shape, dtype=np.uint8)
+        for ade_id, compact in self._lut.items():
+            if compact:
+                out[ade == ade_id] = compact
+        return out
 
 
 def _name_to_class(name: str) -> int:

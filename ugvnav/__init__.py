@@ -7,8 +7,12 @@ __version__ = "0.1.0"
 
 from .camera import Camera, fit_ground_plane, plane_heights
 from .fusion import SAFE, CAUTION, LETHAL, UNKNOWN, COST, fuse, geometry_override
+from .layer3 import Costmap, GridSpec
+from .layer4 import AStarPlanner, MPPIPlanner, PurePursuit, Twist
 
 __all__ = [
     "Camera", "fit_ground_plane", "plane_heights",
     "SAFE", "CAUTION", "LETHAL", "UNKNOWN", "COST", "fuse", "geometry_override",
+    "Costmap", "GridSpec",
+    "AStarPlanner", "MPPIPlanner", "PurePursuit", "Twist",
 ]
