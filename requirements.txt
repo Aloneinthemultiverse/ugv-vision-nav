@@ -1,0 +1,7 @@
+numpy>=1.24
+opencv-python>=4.8
+# Optional: only needed for the model-backed nodes (MonocularDepth, SemanticSegmenter).
+# The geometric core and the entire test suite run without these.
+# torch>=2.0
+# transformers>=4.40
+# pillow>=10.0

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ugvnav"
+version = "0.1.0"
+description = "Vision-based autonomous navigation for UGVs in outdoor environments (SIH26126)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = ["numpy>=1.24", "opencv-python>=4.8"]
+
+[project.optional-dependencies]
+models = ["torch>=2.0", "transformers>=4.40", "pillow>=10.0"]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+include = ["ugvnav*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
