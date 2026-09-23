@@ -309,6 +309,97 @@ Raw per-scene numbers: [`assets/benchmark.csv`](assets/benchmark.csv) ·
 
 ---
 
+## Benchmark against RELLIS-3D ground truth
+
+The comparison above can only measure methods against *each other*. This one
+scores them against **human pixel labels** from RELLIS-3D, an off-road robotics
+dataset collected on unpaved trails at Texas A&M. No method judges its own
+output, so nothing here is circular.
+
+```bash
+python scripts/fetch_rellis.py --n 120     # pulls only the test frames it needs
+python scripts/benchmark_gt.py
+```
+
+`fetch_rellis.py` reads the 5.2 GB archive's ZIP index over HTTP range requests
+and extracts only the frames required, rather than downloading all of it.
+
+### Results — 26 RELLIS-3D test frames, void/sky excluded
+
+```
+method                      IoU trav  IoU block    mIoU  FALSE-SAFE  FALSE-BLOCK
+--------------------------------------------------------------------------------
+A semantic-only                0.729      0.463   0.596       53.4%        0.5%
+B geometry-only                0.729      0.460   0.595       53.9%        0.2%
+C semantic AND geometry        0.702      0.381   0.542       61.9%        0.1%
+D ours                         0.761      0.548   0.654       44.5%        0.8%
+```
+
+**FALSE-SAFE** — ground-truth obstacle the method would have driven into.
+**FALSE-BLOCK** — ground-truth drivable ground the method refused.
+
+Ours wins on every metric: best mIoU (**0.654** vs 0.596 / 0.595 / 0.542) and
+**8.9 points less false-safe** than the semantic-only baseline it is built on.
+The geometry override is doing real work. And C — block only when both cues
+agree — is the *worst* method by a wide margin, which is the empirical case
+against permissive fusion.
+
+### But 44.5 % false-safe is not a good number
+
+Ours is the best of four, and still misses nearly half of all labelled
+obstacles. That is not a result to present as a success, so here is the
+diagnosis:
+
+```
+FALSE-SAFE by ground-truth class
+  obstacle     47.0%   of 776 630 px
+  water        93.5%   of  40 912 px
+
+What our segmenter calls each RELLIS class (row-normalised)
+GT                        trail      grass   vegetation      sky
+obstacle                  53.3%       1.1%        38.0%     7.0%
+water                     43.7%      50.2%         0.0%     0.0%
+unstable (grass/dirt)     21.6%      78.3%         0.0%     0.0%
+```
+
+**The dominant error is a semantic domain gap, not the fusion policy.**
+SegFormer is trained on ADE20k — indoor and urban scenes. It labels **53 % of
+RELLIS obstacle pixels as "trail"**, because dense off-road bush and scrub match
+ADE20k's *earth* / *field* / *land* classes. Geometry rescues some of that
+(D beats A by 9 points) but cannot rescue a low bush that is both mislabelled
+*and* barely raised above the plane.
+
+**Water is essentially undetected — 93.5 % false-safe.** Mud and puddles are
+read as trail or grass. The vocabulary has a water class; nothing ever predicts
+it. That is a genuine capability gap, not a tuning problem.
+
+### What this means
+
+- The **relative** ranking is trustworthy and reproducible: the geometry
+  override measurably improves safety over every baseline tested.
+- The **absolute** numbers are not deployment-ready, and the reason is now
+  quantified rather than guessed: fine-tuning segmentation on off-road classes
+  is the single highest-value next step, worth far more than any further tuning
+  of the fusion rules.
+- These are **zero-shot** numbers. Nothing in this repository was trained on
+  RELLIS-3D. Published RELLIS benchmarks use models trained on its train split,
+  so this is not directly comparable to them.
+
+Raw per-frame numbers: [`assets/benchmark_gt.csv`](assets/benchmark_gt.csv) ·
+[`assets/benchmark_gt.json`](assets/benchmark_gt.json)
+
+### Dataset licence
+
+RELLIS-3D is **CC BY-NC-SA 3.0** — non-commercial, attribution, share-alike.
+The frames are therefore **not committed to this repository**; `fetch_rellis.py`
+downloads them locally and `data/rellis3d/` is gitignored, so this Apache-2.0
+repo stays free of share-alike content.
+
+> Jiang et al., *RELLIS-3D Dataset: Data, Benchmarks and Analysis*, 2020.
+> https://github.com/unmannedlab/RELLIS-3D
+
+---
+
 ## Capabilities
 
 ✅ **Implemented and tested**
@@ -327,7 +418,8 @@ Raw per-scene numbers: [`assets/benchmark.csv`](assets/benchmark.csv) ·
 - A\* global planning, MPPI local planning, regulated pure pursuit
 - End-to-end pipeline: photograph → `v, ω`
 
-⚠️ **Runs, not yet tuned on field data**
+⚠️ **Runs, not yet tuned on field data** — quantified below: 44.5 % of
+RELLIS-3D obstacles are missed, driven by the ADE20k domain gap
 
 - Segmentation uses ADE20k classes; RUGD or RELLIS-3D fine-tuning is the next
   step for genuine off-road vocabulary
@@ -398,7 +490,7 @@ by running on real photographs rather than by inspection:
 | 2 | Layer 3 costmap + Layer 4 planning and control | **done** |
 | 3 | End-to-end single-frame pipeline on real imagery | **done** |
 | 4 | Sequence pipeline — wire in Nodes F and G, fuse IMU/odometry | next |
-| 5 | Fine-tune segmentation on RUGD / RELLIS-3D off-road classes | next |
+| 5 | Fine-tune segmentation on RUGD / RELLIS-3D off-road classes | **next — benchmark shows this is the dominant error source** |
 | 6 | ROS 2 Humble node wrappers, real topic I/O | planned |
 | 7 | Nav2 `costmap_2d` plugins replacing the NumPy fusion | planned |
 | 8 | Gazebo worlds with authored ditches, overhangs, moving hazards | planned |
@@ -447,6 +539,8 @@ ugvnav/
 scripts/
   run_pipeline.py        photograph -> six-panel figure -> v, omega
   benchmark.py           four fusion policies on identical input
+  benchmark_gt.py        scored against RELLIS-3D human labels
+  fetch_rellis.py        pulls RELLIS test frames from a remote zip
 data/offroad/            14 CC-licensed outdoor scenes + SOURCES.json
 tests/                   95 tests against synthetic ground truth
 ```

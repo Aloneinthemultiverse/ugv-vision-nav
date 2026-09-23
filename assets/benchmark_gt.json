@@ -1,0 +1,54 @@
+{
+  "A semantic-only": {
+    "iou_trav": 0.7289,
+    "iou_block": 0.4627,
+    "miou": 0.5958,
+    "false_safe_rate": 0.5338,
+    "false_block_rate": 0.0052,
+    "tp_block": 856046,
+    "false_block": 13912,
+    "false_safe": 980283,
+    "tp_trav": 2673061,
+    "gt_block": 1836329,
+    "gt_trav": 2686973
+  },
+  "B geometry-only": {
+    "iou_trav": 0.7293,
+    "iou_block": 0.4599,
+    "miou": 0.5946,
+    "false_safe_rate": 0.5386,
+    "false_block_rate": 0.0022,
+    "tp_block": 847235,
+    "false_block": 5924,
+    "false_safe": 989094,
+    "tp_trav": 2681049,
+    "gt_block": 1836329,
+    "gt_trav": 2686973
+  },
+  "C semantic AND geometry": {
+    "iou_trav": 0.7023,
+    "iou_block": 0.3809,
+    "miou": 0.5416,
+    "false_safe_rate": 0.6188,
+    "false_block_rate": 0.0007,
+    "tp_block": 700090,
+    "false_block": 1834,
+    "false_safe": 1136239,
+    "tp_trav": 2685139,
+    "gt_block": 1836329,
+    "gt_trav": 2686973
+  },
+  "D ours": {
+    "iou_trav": 0.7606,
+    "iou_block": 0.5482,
+    "miou": 0.6544,
+    "false_safe_rate": 0.4455,
+    "false_block_rate": 0.0078,
+    "tp_block": 1018262,
+    "false_block": 20990,
+    "false_safe": 818067,
+    "tp_trav": 2665983,
+    "gt_block": 1836329,
+    "gt_trav": 2686973
+  }
+}
