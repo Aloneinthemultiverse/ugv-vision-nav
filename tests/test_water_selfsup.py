@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from ugvnav.layer1.selfsup import (FEATURE_DIM, Prototype,
+from ugvnav.layer1.selfsup import (FEATURE_DIM, Prototype, PrototypeSet,
                                    SelfSupervisedTraversability, patch_features)
 from ugvnav.layer2.water import WaterDetector
 
@@ -225,3 +225,72 @@ def test_refine_is_conservative_at_low_confidence():
     changed = (a.refine(base, img) != base).mean()
     assert a.confidence < 0.05
     assert changed < 0.35, "barely-trained adapter overrode too much"
+
+
+# ================================================= multi-modal prototype set
+def _bimodal(n=40, seed=0):
+    """One class, two well-separated clusters - e.g. dry dirt and green grass,
+    both traversable but nowhere near each other in feature space."""
+    rng = np.random.default_rng(seed)
+    a = np.full((n, FEATURE_DIM), 0.1, np.float32) + rng.normal(0, 0.01, (n, FEATURE_DIM))
+    b = np.full((n, FEATURE_DIM), 0.9, np.float32) + rng.normal(0, 0.01, (n, FEATURE_DIM))
+    return np.vstack([a, b]).astype(np.float32)
+
+
+def test_prototype_set_discovers_both_modes():
+    ps = PrototypeSet(novelty=0.22)
+    ps.update(_bimodal())
+    assert 2 <= len(ps) <= 6
+
+
+def test_single_mean_fails_on_a_bimodal_class():
+    """The measured motivation: a mean of two clusters matches neither.
+
+    On RELLIS-3D our recall was 0.639 against 0.919 for the prototype paper.
+    A single centroid sitting in the empty space between dirt and grass is one
+    structural reason a real traversable patch looks far from its own class.
+    """
+    data = _bimodal()
+    member = data[:1]                      # an actual member of the class
+
+    multi = PrototypeSet(); multi.update(data)
+    single = Prototype(); single.update(data)
+
+    assert float(multi.distance(member)[0]) < 0.1
+    assert float(single.distance(member)[0]) > 0.5
+    assert float(multi.distance(member)[0]) < float(single.distance(member)[0])
+
+
+def test_prototype_set_respects_its_cap():
+    rng = np.random.default_rng(2)
+    ps = PrototypeSet(max_prototypes=5, novelty=0.001)
+    ps.update(rng.random((200, FEATURE_DIM)).astype(np.float32))
+    assert len(ps) == 5
+
+
+def test_nearby_samples_update_rather_than_multiply_centroids():
+    ps = PrototypeSet(novelty=0.5)
+    rng = np.random.default_rng(3)
+    ps.update(np.full((50, FEATURE_DIM), 0.4, np.float32)
+              + rng.normal(0, 0.01, (50, FEATURE_DIM)).astype(np.float32))
+    assert len(ps) == 1
+
+
+def test_empty_prototype_set_reports_infinite_distance():
+    ps = PrototypeSet()
+    d = ps.distance(np.zeros((3, FEATURE_DIM), np.float32))
+    assert np.isinf(d).all()
+    assert len(ps) == 0 and ps.count == 0.0
+
+
+def test_prototype_set_mean_lies_between_its_modes():
+    ps = PrototypeSet(); ps.update(_bimodal())
+    m = ps.mean
+    assert m.shape == (FEATURE_DIM,)
+    assert 0.2 < float(m.mean()) < 0.8
+
+
+def test_adapter_uses_the_multi_modal_set():
+    a = SelfSupervisedTraversability()
+    assert isinstance(a.traversable, PrototypeSet)
+    assert isinstance(a.obstacle, PrototypeSet)

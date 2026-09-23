@@ -11,7 +11,7 @@ for Unmanned Ground Vehicle for Outdoor Environment* (Bharat Electronics
 Limited · theme *Smart Automation* · category *Software*).
 
 ```
-four layers + localization + self-supervision + closed-loop sim · 171 tests · CPU only
+four layers + localization + self-supervision + closed-loop sim · 178 tests · CPU only
 ```
 
 ---
@@ -169,7 +169,7 @@ tracking velocity.
 
 ```bash
 pip install -r requirements.txt
-pytest -q                     # 171 tests, no model download required
+pytest -q                     # 178 tests, no model download required
 ```
 
 The geometric core has no ML dependency at all. Model-backed nodes sit behind
@@ -586,6 +586,70 @@ The safety property that matters: **an untrained adapter defers entirely.** It
 reports its own confidence, returns 0.5 - "no opinion" - before it has driven
 anywhere, and overrides the pre-trained model only in proportion to evidence
 gathered. Tested.
+
+
+---
+
+## How we compare to the published methods
+
+The benchmarks above compare our own variants. This compares us to what the
+papers actually report, in the same metrics. Our numbers are recomputed from
+`assets/benchmark_gt.csv` for the non-traversable class, which is how the
+traversability literature reports it.
+
+### Traversability on RELLIS-3D
+
+| | Precision | Recall | F1 |
+|---|---|---|---|
+| Prototype adaptation, arXiv 2504.12109 *(trained on RELLIS)* | 0.867 | **0.919** | **0.890** |
+| **ugvnav** *(zero-shot, never trained on RELLIS)* | **0.971** | 0.639 | 0.771 |
+| semantic-only baseline | 0.980 | 0.518 | 0.678 |
+| geometry-only baseline | 0.994 | 0.526 | 0.688 |
+| semantic AND geometry | 0.997 | 0.415 | 0.586 |
+
+**We are more precise and much blinder.** When we call something an obstacle we
+are right 97 % of the time — better than the published method — but we find only
+64 % of them against their 92 %. The entire 12-point F1 gap is recall, which is
+the same finding as our 36 % false-safe rate seen from another angle.
+
+The comparison is *not* like-for-like and should not be quoted as if it were:
+they train on RELLIS trajectories, we have never seen the dataset. That said,
+the direction of the gap is informative regardless of the handicap.
+
+### What we changed because of it
+
+Their method clusters each class into **50 / 100 / 500 prototypes**; ours used a
+single mean per class. That is a structural cause of low recall: "traversable"
+off-road spans dirt, grass and gravel, whose centroid sits in empty space
+between them and matches none of them well.
+
+`PrototypeSet` now grows centroids online — a sample far from every existing
+centroid starts a new one, following the same paper's online-clustering rule.
+On a synthetic bimodal class the distance from a real member to its own class
+drops from **1.057 to 0.006**, and there is a test asserting the single-mean
+formulation fails where the multi-modal one succeeds.
+
+### Closed-loop navigation
+
+| | SR | SPL |
+|---|---|---|
+| Offroad-Nav, arXiv 2604.03096 *(real vehicle, monocular)* | **100 %** | **0.59** |
+| **ugvnav** *(own synthetic benchmark, easy)* | 68 % | 0.63 |
+| **ugvnav** *(hard)* | 4 % | 0.03 |
+
+**Not comparable, and far behind.** Different worlds, sensor model and
+difficulty definition, and theirs is on real hardware while ours is a benchmark
+we wrote ourselves — the weaker form of evidence. Recorded so the gap is visible
+rather than implied.
+
+### Water detection
+
+Han et al. (ECCV 2018) report that FCN-8s with Reflection Attention Units beats
+FCN-8s, DeepLab V2 and a GMM baseline on their ONR and OFR datasets, but the
+numeric tables are not in any openly reachable version we could retrieve, and
+there is no public implementation. Our detector therefore has **no published
+baseline to be measured against**, and its RELLIS water recall has not yet been
+re-measured since it was added. That is an open item, not a result.
 
 
 ---

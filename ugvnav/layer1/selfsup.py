@@ -27,7 +27,8 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-__all__ = ["patch_features", "Prototype", "SelfSupervisedTraversability"]
+__all__ = ["patch_features", "Prototype", "PrototypeSet",
+           "SelfSupervisedTraversability"]
 
 #: Length of the per-patch feature vector produced by :func:`patch_features`.
 FEATURE_DIM = 7
@@ -99,6 +100,75 @@ class Prototype:
         return np.linalg.norm(f - self.mean, axis=-1)
 
 
+class PrototypeSet:
+    """A multi-modal class model: several centroids rather than one mean.
+
+    A single mean cannot describe a class whose members form separate clusters.
+    Off-road "traversable" is exactly that - dirt, grass and gravel differ
+    sharply in colour and texture, and their average resembles none of them.
+
+    Following the online-clustering formulation of arXiv 2504.12109, a sample
+    close to an existing centroid updates it; a sample far from all of them
+    creates a new centroid, so the model grows to fit terrain it has never seen
+    without any offline clustering pass.
+
+    Args:
+        max_prototypes: cap on centroids, so an outdoor run cannot grow without
+            bound.
+        novelty: distance beyond which a sample starts a new centroid rather
+            than updating the nearest one.
+        momentum: update rate for an existing centroid.
+    """
+
+    def __init__(self, max_prototypes: int = 24, novelty: float = 0.22,
+                 momentum: float = 0.08) -> None:
+        self.max_prototypes = int(max_prototypes)
+        self.novelty = float(novelty)
+        self.momentum = float(momentum)
+        self.centroids: list[np.ndarray] = []
+        self.weights: list[float] = []
+        self.count = 0.0
+
+    def __len__(self) -> int:
+        return len(self.centroids)
+
+    @property
+    def mean(self) -> np.ndarray:
+        """Weighted mean of all centroids, for comparison and diagnostics."""
+        if not self.centroids:
+            return np.zeros(FEATURE_DIM, np.float32)
+        w = np.asarray(self.weights, np.float32)[:, None]
+        return (np.stack(self.centroids) * w).sum(axis=0) / max(w.sum(), 1e-6)
+
+    def update(self, features: np.ndarray, weight: float = 1.0) -> None:
+        """Assign each sample to its nearest centroid, or start a new one."""
+        f = np.asarray(features, np.float32).reshape(-1, FEATURE_DIM)
+        if f.size == 0:
+            return
+        for v in f:
+            if not self.centroids:
+                self.centroids.append(v.copy()); self.weights.append(weight)
+                continue
+            d = np.linalg.norm(np.stack(self.centroids) - v, axis=1)
+            i = int(np.argmin(d))
+            if d[i] > self.novelty and len(self.centroids) < self.max_prototypes:
+                self.centroids.append(v.copy()); self.weights.append(weight)
+            else:
+                m = self.momentum
+                self.centroids[i] = ((1.0 - m) * self.centroids[i] + m * v).astype(np.float32)
+                self.weights[i] += weight
+        self.count += float(f.shape[0] * weight)
+
+    def distance(self, features: np.ndarray) -> np.ndarray:
+        """Distance to the NEAREST centroid - the multi-modal match."""
+        f = np.asarray(features, np.float32)
+        if not self.centroids:
+            return np.full(f.shape[:-1], np.inf, np.float32)
+        c = np.stack(self.centroids)                       # (K, D)
+        d = np.linalg.norm(f[..., None, :] - c, axis=-1)   # (..., K)
+        return d.min(axis=-1).astype(np.float32)
+
+
 class SelfSupervisedTraversability:
     """Online traversability adapter trained by driving, not by annotation.
 
@@ -108,16 +178,22 @@ class SelfSupervisedTraversability:
             is trusted at all.
         full_evidence: evidence at which the adapter is trusted fully.
         margin: distance ratio below which a patch is called traversable.
+        max_prototypes: centroids retained per class.
+        novelty: distance beyond which a sample starts a new centroid.
     """
 
     def __init__(self, patch: int = 16, min_evidence: float = 40.0,
-                 full_evidence: float = 400.0, margin: float = 1.0) -> None:
+                 full_evidence: float = 400.0, margin: float = 1.0,
+                 max_prototypes: int = 24, novelty: float = 0.22) -> None:
         self.patch = int(patch)
         self.min_evidence = float(min_evidence)
         self.full_evidence = float(full_evidence)
         self.margin = float(margin)
-        self.traversable = Prototype()
-        self.obstacle = Prototype()
+        # Multi-modal by default: a single mean cannot represent a class whose
+        # members form separate clusters, and measurement says recall is our
+        # weak axis. See PrototypeSet.
+        self.traversable = PrototypeSet(max_prototypes, novelty)
+        self.obstacle = PrototypeSet(max_prototypes, novelty)
 
     # ------------------------------------------------------------- learning
     @property
