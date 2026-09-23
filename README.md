@@ -11,7 +11,7 @@ for Unmanned Ground Vehicle for Outdoor Environment* (Bharat Electronics
 Limited · theme *Smart Automation* · category *Software*).
 
 ```
-all four layers · 95 tests · pure NumPy/OpenCV core · CPU only · no ROS needed
+four layers + localization + closed-loop sim · 150 tests · CPU only · no ROS
 ```
 
 ---
@@ -127,7 +127,8 @@ LAYER 4    A* global · MPPI local · pure pursuit  → v, ω
 | **A** | `layer1.elevation` | RANSAC ground-plane fit → signed height field, rescaled to the known camera mounting height to resolve monocular scale |
 | **B** | `layer1.semantics` | SegFormer classes reduced to a 7-word traversability vocabulary |
 | **C** | `layer1.uncertainty` | Augmentation consistency: run the depth net under perturbations, measure disagreement |
-| **D** | `layer1.odometry` | ORB + essential matrix visual odometry — **pose without GPS** |
+| **D** | `layer1.odometry` | ORB + essential matrix visual odometry |
+| **D+** | `layer1.localization` | EKF fusing VO + IMU + wheel odometry, loop-closure detection, SE(2) pose-graph optimisation — **pose without GPS** |
 | — | `layer1.depth` | Monocular depth behind an interface (Depth Anything V2) |
 
 ### Layer 2 — hazard resolution
@@ -166,7 +167,7 @@ tracking velocity.
 
 ```bash
 pip install -r requirements.txt
-pytest -q                     # 95 tests, ~2 s, no model download required
+pytest -q                     # 150 tests, ~23 s, no model download required
 ```
 
 The geometric core has no ML dependency at all. Model-backed nodes sit behind
@@ -421,7 +422,7 @@ version: **no open-source project covers all of it.**
 |---|---|---|---|---|---|
 | Monocular-only | ● | ● | ○ | ● | ◐ |
 | Semantics | ● | ○ | ● | ◐ | ○ |
-| **Localization / SLAM** | **◐ VO only** | **● VINS-Mono** | ● | ○ | ○ |
+| **Localization / SLAM** | **● EKF + loop closure + pose graph** | ● VINS-Mono | ● | ○ | ○ |
 | Negative obstacles | ● | ○ | ◐ | ○ | ◐ |
 | Dynamic obstacles | ● | ○ | ● | ○ | ○ |
 | Overhead clearance | ● | ○ | ◐ | ○ | ○ |
@@ -429,7 +430,8 @@ version: **no open-source project covers all of it.**
 | Multi-layer costmap | ● | ◐ binary | ● | ○ | ◐ |
 | Planning | ● A\*/MPPI | ● A\*/TEB | ● | ○ | ○ |
 | ROS 2 | ○ | ○ ROS 1 | ● | ○ | ● |
-| **Field-tested on a vehicle** | **○** | **●** | ● | ● | ● |
+| Closed-loop evaluation | ● simulated | ● real vehicle | ● | ● | ● |
+| **Field-tested on a real vehicle** | **○** | **●** | ● | ● | ● |
 
 `LARIAD/Offroad-Nav` is the closest comparable work, and it independently chose
 **the same depth backbone we did** (Depth Anything V2). Its costmap is a single
@@ -448,6 +450,82 @@ Also worth noting: WVN's **self-supervised** traversability — learn from what 
 robot successfully drove over — is probably a better answer to the 35 %
 obstacle-mislabel rate our benchmark measured than supervised fine-tuning would
 be, because it needs no off-road annotations at all.
+
+---
+
+## Closed-loop navigation benchmark
+
+Segmentation IoU says whether pixels are labelled correctly. It does not say
+whether the vehicle **arrives**. This drives the real Layer 3 and Layer 4 code
+through randomised worlds with a limited, occluded, noisy sensor (90 degree
+field of view, 8 m range, rays stop at the first hit), reporting the standard
+off-road metrics.
+
+```bash
+python scripts/benchmark_closedloop.py --episodes 25
+```
+
+### Results - 25 episodes per difficulty
+
+```
+FULL STACK (map memory on, pure pursuit)
+                 SR     SPL  collide  timeout
+easy          60.0%   0.548       10        0
+medium        32.0%   0.288       17        0
+hard           4.0%   0.035       24        0
+
+ABLATION: map memory OFF (costmap rebuilt from each frame)
+easy          52.0%   0.518       12        0
+medium        24.0%   0.240       19        0
+hard           4.0%   0.040       24        0
+
+ABLATION: MPPI local planner instead of pure pursuit
+easy          28.0%   0.280       18        0
+medium        16.0%   0.154       21        0
+hard           0.0%   0.000       25        0
+```
+
+**This is not a good success rate, and it is not presented as one.** Failures
+are collision-dominated, and *hard* is effectively a failure at 4 %.
+
+What the ablations do establish:
+
+- **Map memory earns its place: +8 points of SR on easy and medium.**
+  `PersistentMap` keeps observations in the world frame so an obstacle that
+  leaves the field of view is not forgotten. It is what makes localization
+  load-bearing - without a pose estimate there is no frame to accumulate in.
+- **MPPI currently *hurts* (28 % vs 60 % on easy).** It replans in the vehicle
+  frame each step and is more likely mis-parameterised than wrong in principle,
+  but pure pursuit following a freshly-replanned global path is the stronger
+  configuration today. Reported rather than hidden.
+
+### Two real bugs this found that unit tests could not
+
+1. **The three motion models disagreed on the sign of rotation.**
+   `Vehicle`/`PoseFilter` used `x -= v*sin(theta)*dt` (positive theta turns
+   left), `MPPIPlanner.rollout` used `x += v*sin(theta)*dt` (positive theta
+   turns right), and `PurePursuit` assumed a target on the right needed a
+   positive omega. The result: the controller steered *away* from its own path
+   and the vehicle spiralled out of bounds - 100 % collisions. Every unit test
+   passed, because each checked a sign against its own assumption. Only closing
+   the loop exposed it. There are now two cross-module regression tests,
+   `test_controller_and_vehicle_model_agree_on_turn_direction` and
+   `test_mppi_rollout_matches_the_vehicle_motion_model`.
+
+2. **Naive map memory made things worse before it made them better.** With
+   `hits_to_occupy=1`, a single noisy ray permanently occupied a cell, the map
+   silted up and corridors closed: SR *fell* from 58 % to 25 %. Requiring
+   sustained evidence (3.0) with decay (0.93) turned it into a gain. A sweep
+   chose those values, and a test records the trap that evidence saturates at
+   `1/(1-decay)`, so a threshold above that ceiling can never fire.
+
+### Honest comparison
+
+`LARIAD/Offroad-Nav` reports 100 % SR and 59 % SPL monocular. **Our numbers are
+far below that, and the two are not comparable** - different worlds, sensor
+model and difficulty definition. Their result is on a real vehicle; ours is a
+synthetic benchmark of our own construction, which is weaker evidence. Closing
+that gap is the priority, not the ablations.
 
 ---
 
@@ -481,8 +559,6 @@ RELLIS-3D obstacles are missed, driven by the ADE20k domain gap
 ❌ **Not implemented**
 
 - ROS 2 node wrappers and `costmap_2d` plugin builds
-- Loop closure / full SLAM back-end (Node D is odometry, not SLAM)
-- Simulator integration and closed-loop navigation runs
 - IMU and wheel-odometry fusion (interfaces exist, filter does not)
 
 **Nothing here has driven a vehicle, simulated or real.** It is a perception,
@@ -578,7 +654,8 @@ ugvnav/
     elevation.py         Node A — ground plane and height field
     semantics.py         Node B — traversability vocabulary
     uncertainty.py       Node C — augmentation-consistency uncertainty
-    odometry.py          Node D — visual odometry, pose without GPS
+    odometry.py          Node D — visual odometry
+    localization.py      Node D+ — EKF fusion, loop closure, pose graph
   layer2/
     negative_obstacle.py Node E — ditches and drop-offs
     dynamic.py           Node F — ego-motion compensated tracking
@@ -587,12 +664,15 @@ ugvnav/
     costmap.py           metric costmap, inflation, dynamic sweeping
   layer4/
     planner.py           A*, MPPI, regulated pure pursuit
+  sim/
+    world.py             closed-loop simulator, sensing, SR / SPL episodes
 docs/
   RELATED_WORK.md        capability survey of comparable open-source projects
 scripts/
   run_pipeline.py        photograph -> six-panel figure -> v, omega
   benchmark.py           four fusion policies on identical input
   benchmark_gt.py        scored against RELLIS-3D human labels
+  benchmark_closedloop.py  does the vehicle arrive? SR / SPL
   fetch_rellis.py        pulls RELLIS test frames from a remote zip
 data/offroad/            14 CC-licensed outdoor scenes + SOURCES.json
 tests/                   95 tests against synthetic ground truth

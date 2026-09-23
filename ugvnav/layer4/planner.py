@@ -151,7 +151,9 @@ class MPPIPlanner:
         out = np.empty((v.shape[0], self.horizon, 3))
         for k in range(self.horizon):
             th = th + w[:, k] * self.dt
-            x = x + v[:, k] * np.sin(th) * self.dt   # +Y is forward at theta=0
+            # Convention, shared with Vehicle and PoseFilter: +Y forward,
+            # +X right, positive theta counter-clockwise (toward -X).
+            x = x - v[:, k] * np.sin(th) * self.dt
             y = y + v[:, k] * np.cos(th) * self.dt
             out[:, k] = np.stack([x, y, th], axis=-1)
         return out
@@ -242,7 +244,13 @@ class PurePursuit:
         if dist < 1e-6:
             return Twist(0.0, 0.0)
 
-        curvature = 2.0 * fx / (dist ** 2)
+        # Pure-pursuit curvature. fx is the lateral offset of the target in the
+        # body frame, positive to the right. Because positive yaw rate turns the
+        # vehicle counter-clockwise (toward -X), steering toward a target on the
+        # right requires a NEGATIVE omega - hence the sign here. Getting this
+        # wrong makes the controller steer away from its target; see
+        # test_controller_and_vehicle_model_agree_on_turn_direction.
+        curvature = -2.0 * fx / (dist ** 2)
         v = self.v_nominal / (1.0 + 1.5 * abs(curvature))
 
         if costmap is not None:

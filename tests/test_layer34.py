@@ -188,12 +188,53 @@ def test_pure_pursuit_goes_straight_for_a_straight_path():
 
 
 def test_pure_pursuit_turns_toward_an_offset_path():
+    # +theta is counter-clockwise (toward -X), so steering toward a target on
+    # the right (+X) requires a negative yaw rate.
     path = np.array([[x, 0.2] for x in np.arange(0.0, 4.0, 0.1)])
     cmd = PurePursuit(lookahead=1.0).step((0.0, 0.0, 0.0), path)
-    assert cmd.angular > 0.05        # target is to the right, so turn right
+    assert cmd.angular < -0.05
 
     mirrored = np.array([[-x, 0.2] for x in np.arange(0.0, 4.0, 0.1)])
-    assert PurePursuit(lookahead=1.0).step((0.0, 0.0, 0.0), mirrored).angular < -0.05
+    assert PurePursuit(lookahead=1.0).step((0.0, 0.0, 0.0), mirrored).angular > 0.05
+
+
+def test_controller_and_vehicle_model_agree_on_turn_direction():
+    """Regression: the controller must actually drive the vehicle TOWARD the
+    path, not away from it. Unit tests that only check the sign of omega cannot
+    catch a convention mismatch between the controller and the motion model -
+    this closes that loop explicitly."""
+    from ugvnav.sim.world import Vehicle
+
+    rng = np.random.default_rng(0)
+    for direction in (+1.0, -1.0):
+        path = np.array([[direction * x, 0.3] for x in np.arange(0.0, 6.0, 0.1)])
+        veh = Vehicle(x=0.0, y=0.0, theta=0.0, noise=0.0)
+        ctrl = PurePursuit(lookahead=1.0)
+        before = abs(veh.x - direction * 2.0)
+        for _ in range(25):
+            cmd = ctrl.step(veh.pose, path)
+            veh.step(cmd.linear, cmd.angular, 0.1, rng)
+        assert abs(veh.x - direction * 2.0) < before, "controller steered away from the path"
+        assert np.sign(veh.x) == np.sign(direction)
+
+
+def test_mppi_rollout_matches_the_vehicle_motion_model():
+    """MPPI's internal model must match the vehicle it is steering."""
+    from ugvnav.sim.world import Vehicle
+
+    cm = Costmap(GridSpec(40, 40, 0.1, -2.0, 0.0))
+    p = MPPIPlanner(cm, horizon=20, dt=0.1, samples=1)
+    v = np.full((1, 20), 0.8)
+    w = np.full((1, 20), 0.4)
+    traj = p.rollout((0.0, 0.0, 0.0), v, w)
+
+    veh = Vehicle(x=0.0, y=0.0, theta=0.0, noise=0.0)
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        veh.step(0.8, 0.4, 0.1, rng)
+
+    assert traj[0, -1, 0] == pytest.approx(veh.x, abs=1e-6)
+    assert traj[0, -1, 1] == pytest.approx(veh.y, abs=1e-6)
 
 
 def test_pure_pursuit_stops_on_an_empty_path():

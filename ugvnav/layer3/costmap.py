@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-__all__ = ["FREE", "CAUTION", "INSCRIBED", "LETHAL", "GridSpec", "Costmap"]
+__all__ = ["FREE", "CAUTION", "INSCRIBED", "LETHAL", "GridSpec",
+           "Costmap", "PersistentMap"]
 
 FREE, CAUTION, INSCRIBED, LETHAL = 0, 128, 253, 254
 
@@ -170,3 +171,93 @@ class Costmap:
 
     def is_free(self, x: float, y: float, limit: int = INSCRIBED) -> bool:
         return self.cost_at(x, y) < limit
+
+
+class PersistentMap:
+    """World-frame memory of observed hazards.
+
+    A costmap built fresh from each frame forgets everything outside the current
+    field of view, so a vehicle that turns can drive into an obstacle it saw a
+    moment ago. This keeps observations in the world frame, referenced to the
+    pose estimate, and renders a vehicle-frame ``Costmap`` on demand.
+
+    This is the component that makes localization load-bearing: without a pose
+    estimate there is no frame to accumulate in.
+
+    Args:
+        resolution: metres per stored cell.
+        hits_to_occupy: evidence required before a cell counts as an obstacle.
+        decay: multiplier applied to all evidence each update, so stale
+            observations fade and the map can recover from false positives.
+
+    Note:
+        Evidence for a continuously-observed cell converges to
+        weight / (1 - decay). hits_to_occupy must sit below that, or no
+        cell can ever become occupied: at decay=0.5 the ceiling is 2.0, so a
+        threshold of 3.0 never fires. The defaults (3.0, 0.93) give a ceiling of
+        about 14 and were chosen by sweeping closed-loop success rate.
+    """
+
+    def __init__(self, resolution: float = 0.15, hits_to_occupy: float = 3.0,
+                 decay: float = 0.93) -> None:
+        if resolution <= 0:
+            raise ValueError("resolution must be positive")
+        self.resolution = float(resolution)
+        self.hits_to_occupy = float(hits_to_occupy)
+        self.decay = float(decay)
+        self._cells: dict[tuple[int, int], float] = {}
+
+    def __len__(self) -> int:
+        return sum(1 for v in self._cells.values() if v >= self.hits_to_occupy)
+
+    def _key(self, x, y):
+        return (int(np.floor(x / self.resolution + 1e-9)),
+                int(np.floor(y / self.resolution + 1e-9)))
+
+    def integrate(self, xs, ys, pose, weight: float = 1.0) -> int:
+        """Add vehicle-frame observations, transformed by ``pose`` into the world.
+
+        Args:
+            xs, ys: hit coordinates in the vehicle frame (+Y forward, +X right).
+            pose: (x, y, theta) of the vehicle in the world.
+        """
+        xs = np.atleast_1d(np.asarray(xs, float))
+        ys = np.atleast_1d(np.asarray(ys, float))
+        if self.decay < 1.0 and self._cells:
+            for k in list(self._cells):
+                v = self._cells[k] * self.decay
+                if v < 0.05:
+                    del self._cells[k]
+                else:
+                    self._cells[k] = v
+        if xs.size == 0:
+            return 0
+        px, py, th = pose
+        c, s = np.cos(th), np.sin(th)
+        wx = px + xs * c - ys * s
+        wy = py + xs * s + ys * c
+        for x, y in zip(wx.tolist(), wy.tolist()):
+            k = self._key(x, y)
+            self._cells[k] = self._cells.get(k, 0.0) + weight
+        return int(xs.size)
+
+    def occupied_points(self) -> np.ndarray:
+        """(N, 2) world-frame centres of cells believed occupied."""
+        keys = [k for k, v in self._cells.items() if v >= self.hits_to_occupy]
+        if not keys:
+            return np.empty((0, 2))
+        return (np.asarray(keys, float) + 0.5) * self.resolution
+
+    def to_costmap(self, pose, spec, robot_radius: float = 0.35,
+                   inflation_radius: float = 0.9) -> "Costmap":
+        """Render remembered hazards into a vehicle-frame costmap."""
+        cm = Costmap(spec, robot_radius=robot_radius,
+                     inflation_radius=inflation_radius)
+        pts = self.occupied_points()
+        if pts.size:
+            px, py, th = pose
+            c, s = np.cos(-th), np.sin(-th)
+            d = pts - np.array([px, py])
+            cm.mark(d[:, 0] * c - d[:, 1] * s, d[:, 0] * s + d[:, 1] * c, LETHAL)
+        cm.inflate()
+        return cm
