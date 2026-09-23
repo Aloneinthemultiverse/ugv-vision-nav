@@ -412,6 +412,45 @@ repo stays free of share-alike content.
 
 ---
 
+## How this compares to existing projects
+
+A full survey is in [`docs/RELATED_WORK.md`](docs/RELATED_WORK.md). The short
+version: **no open-source project covers all of it.**
+
+| | ugvnav | [Offroad-Nav](https://github.com/LARIAD/Offroad-Nav) | [Autoware](https://github.com/autowarefoundation/autoware) | [WVN](https://github.com/leggedrobotics/wild_visual_navigation) | [elev_mapping_cupy](https://github.com/leggedrobotics/elevation_mapping_cupy) |
+|---|---|---|---|---|---|
+| Monocular-only | ● | ● | ○ | ● | ◐ |
+| Semantics | ● | ○ | ● | ◐ | ○ |
+| **Localization / SLAM** | **◐ VO only** | **● VINS-Mono** | ● | ○ | ○ |
+| Negative obstacles | ● | ○ | ◐ | ○ | ◐ |
+| Dynamic obstacles | ● | ○ | ● | ○ | ○ |
+| Overhead clearance | ● | ○ | ◐ | ○ | ○ |
+| **Geometry override** | **●** | ○ | ○ | ○ | ○ |
+| Multi-layer costmap | ● | ◐ binary | ● | ○ | ◐ |
+| Planning | ● A\*/MPPI | ● A\*/TEB | ● | ○ | ○ |
+| ROS 2 | ○ | ○ ROS 1 | ● | ○ | ● |
+| **Field-tested on a vehicle** | **○** | **●** | ● | ● | ● |
+
+`LARIAD/Offroad-Nav` is the closest comparable work, and it independently chose
+**the same depth backbone we did** (Depth Anything V2). Its costmap is a single
+binary height threshold at 30 cm — which cannot separate a rock from tall grass,
+and cannot see a ditch at all, because a hole is *below* the plane and a height
+threshold never fires on it.
+
+**Where we are behind, and it matters:** they have real metric localization
+(VINS-Mono + EKF over GNSS/IMU) and published closed-loop results on an actual
+vehicle — 100 % success rate, 59 % SPL monocular. We have visual odometry with
+no loop closure and no filter, segmentation IoU on 52 still frames, and no
+closed-loop result of any kind. For a problem statement that explicitly requires
+position and orientation without GPS, localization is our weakest area.
+
+Also worth noting: WVN's **self-supervised** traversability — learn from what the
+robot successfully drove over — is probably a better answer to the 35 %
+obstacle-mislabel rate our benchmark measured than supervised fine-tuning would
+be, because it needs no off-road annotations at all.
+
+---
+
 ## Capabilities
 
 ✅ **Implemented and tested**
@@ -548,6 +587,8 @@ ugvnav/
     costmap.py           metric costmap, inflation, dynamic sweeping
   layer4/
     planner.py           A*, MPPI, regulated pure pursuit
+docs/
+  RELATED_WORK.md        capability survey of comparable open-source projects
 scripts/
   run_pipeline.py        photograph -> six-panel figure -> v, omega
   benchmark.py           four fusion policies on identical input
