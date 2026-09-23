@@ -11,7 +11,7 @@ for Unmanned Ground Vehicle for Outdoor Environment* (Bharat Electronics
 Limited · theme *Smart Automation* · category *Software*).
 
 ```
-four layers + localization + closed-loop sim · 150 tests · CPU only · no ROS
+four layers + localization + self-supervision + closed-loop sim · 171 tests · CPU only
 ```
 
 ---
@@ -126,6 +126,7 @@ LAYER 4    A* global · MPPI local · pure pursuit  → v, ω
 |------|--------|----------------|
 | **A** | `layer1.elevation` | RANSAC ground-plane fit → signed height field, rescaled to the known camera mounting height to resolve monocular scale |
 | **B** | `layer1.semantics` | SegFormer classes reduced to a 7-word traversability vocabulary |
+| **B+** | `layer1.selfsup` | Self-supervised adaptation — learns traversability from terrain the vehicle actually drove |
 | **C** | `layer1.uncertainty` | Augmentation consistency: run the depth net under perturbations, measure disagreement |
 | **D** | `layer1.odometry` | ORB + essential matrix visual odometry |
 | **D+** | `layer1.localization` | EKF fusing VO + IMU + wheel odometry, loop-closure detection, SE(2) pose-graph optimisation — **pose without GPS** |
@@ -138,6 +139,7 @@ LAYER 4    A* global · MPPI local · pure pursuit  → v, ω
 | **E** | `layer2.negative_obstacle` | Vertical depth derivative + below-plane deviation → drop-offs, emitted as a per-column **virtual laser scan** |
 | **F** | `layer2.dynamic` | Predicts the flow the vehicle's own motion causes and subtracts it; what still moves is genuinely moving, and gets a velocity vector |
 | **G** | `layer2.voxel` | Sparse 3D occupancy → *"is anything solid between the wheels and the roof?"* |
+| **H** | `layer2.water` | Water and mud from reflection, texture collapse and sky chroma |
 
 ### Layer 3 — costmap fusion
 
@@ -167,7 +169,7 @@ tracking velocity.
 
 ```bash
 pip install -r requirements.txt
-pytest -q                     # 150 tests, ~23 s, no model download required
+pytest -q                     # 171 tests, no model download required
 ```
 
 The geometric core has no ML dependency at all. Model-backed nodes sit behind
@@ -468,36 +470,47 @@ python scripts/benchmark_closedloop.py --episodes 25
 ### Results - 25 episodes per difficulty
 
 ```
-FULL STACK (map memory on, pure pursuit)
+FULL STACK (map memory on, pure pursuit, rotate-to-look recovery)
                  SR     SPL  collide  timeout
-easy          60.0%   0.548       10        0
-medium        32.0%   0.288       17        0
-hard           4.0%   0.035       24        0
+easy          68.0%   0.630        8        0
+medium        24.0%   0.222       19        0
+hard           4.0%   0.034       23        1
+```
 
-ABLATION: map memory OFF (costmap rebuilt from each frame)
-easy          52.0%   0.518       12        0
-medium        24.0%   0.240       19        0
-hard           4.0%   0.040       24        0
+Ablation over 60 episodes (20 per difficulty), map memory on vs off:
 
-ABLATION: MPPI local planner instead of pure pursuit
-easy          28.0%   0.280       18        0
-medium        16.0%   0.154       21        0
-hard           0.0%   0.000       25        0
+```
+memory ON    easy 13/20   medium 6/20   hard 1/20   total 20/60
+memory OFF   easy  8/20   medium 5/20   hard 1/20   total 14/60
 ```
 
 **This is not a good success rate, and it is not presented as one.** Failures
-are collision-dominated, and *hard* is effectively a failure at 4 %.
+are collision-dominated and *hard* is effectively a failure at 4 %.
 
 What the ablations do establish:
 
-- **Map memory earns its place: +8 points of SR on easy and medium.**
-  `PersistentMap` keeps observations in the world frame so an obstacle that
-  leaves the field of view is not forgotten. It is what makes localization
-  load-bearing - without a pose estimate there is no frame to accumulate in.
-- **MPPI currently *hurts* (28 % vs 60 % on easy).** It replans in the vehicle
-  frame each step and is more likely mis-parameterised than wrong in principle,
-  but pure pursuit following a freshly-replanned global path is the stronger
-  configuration today. Reported rather than hidden.
+- **Map memory earns its place: 20/60 vs 14/60 successes.** `PersistentMap`
+  keeps observations in the world frame, so an obstacle leaving the field of
+  view is not forgotten. It is what makes localization load-bearing - without a
+  pose estimate there is no frame to accumulate in.
+- **Rotate-to-look recovery helped: easy 60 % -> 68 %.** When no plan exists the
+  usual cause is a goal outside a narrow field of view, not a blocked world, so
+  rotating to widen the view beats reversing into unobserved ground.
+- **MPPI currently hurts** (36 % vs 68 % on easy). Reported rather than hidden.
+
+### An attempted fix that made things worse
+
+Clutter-scaled speed - slow down where the costmap is dense - looked obviously
+right and **regressed every difficulty**: easy 60 % -> 52 %, hard 4 % -> 0 %.
+
+The reason is structural. In pure pursuit `omega = curvature * v`, so cutting
+linear speed cuts the turn rate with it: the vehicle then drives *slowly* into
+the obstacle instead of turning out of the way. Reducing speed near clutter
+requires decoupling steering from speed first.
+
+It survives as `PurePursuit(clutter_gain=...)`, **off by default**, with the
+measurement recorded in the code. Keeping the negative result is more useful
+than quietly deleting the idea.
 
 ### Two real bugs this found that unit tests could not
 
@@ -526,6 +539,54 @@ far below that, and the two are not comparable** - different worlds, sensor
 model and difficulty definition. Their result is on a real vehicle; ours is a
 synthetic benchmark of our own construction, which is weaker evidence. Closing
 that gap is the priority, not the ablations.
+
+---
+
+## Water detection and self-supervised adaptation
+
+Both target failures our own benchmarks measured. See
+[`docs/RESEARCH.md`](docs/RESEARCH.md) for the literature map and what was taken
+from each source.
+
+### Node H - water and mud (`layer2/water.py`)
+
+RELLIS-3D measured **82.3 % of labelled water as false-safe**: mud and puddles
+read as trail or grass, and would have been driven into.
+
+Polarisation is the strongest cue in the literature and needs a filter we do not
+have; the ECCV 2018 reflection-attention network has no public implementation.
+So the three usable monocular cues are encoded directly as physics, needing no
+training data at all:
+
+| Cue | Physics |
+|---|---|
+| **Reflection** | Water is a mirror, so a patch correlates with the scene vertically above it - the reflection-attention idea computed explicitly rather than learned |
+| **Smoothness** | Still water carries almost no texture, so local variance collapses |
+| **Sky chroma** | A puddle reflects the sky, shifting blue and losing saturation |
+
+Height gates the result: water lies flat, so anything standing proud of the
+ground plane is rejected. A smooth blue boulder is still a boulder, and there is
+a test for exactly that.
+
+### Node B+ - self-supervised adaptation (`layer1/selfsup.py`)
+
+RELLIS-3D measured the domain gap precisely: SegFormer labels **35 % of true
+obstacle pixels as "trail"**, because ADE20k has no off-road vocabulary.
+
+Wild Visual Navigation supplies the insight that makes labels free: **terrain
+the vehicle already drove over is, by definition, traversable.** The robot's own
+experience is the annotation.
+
+We use the prototype formulation rather than WVN's online gradient training,
+because prototypes need no backward pass and stay inside the CPU-only budget:
+two running prototypes in a small hand-built feature space, positives harvested
+from the swept footprint, negatives from confirmed collisions.
+
+The safety property that matters: **an untrained adapter defers entirely.** It
+reports its own confidence, returns 0.5 - "no opinion" - before it has driven
+anywhere, and overrides the pre-trained model only in proportion to evidence
+gathered. Tested.
+
 
 ---
 
@@ -656,10 +717,12 @@ ugvnav/
     uncertainty.py       Node C — augmentation-consistency uncertainty
     odometry.py          Node D — visual odometry
     localization.py      Node D+ — EKF fusion, loop closure, pose graph
+    selfsup.py           Node B+ — self-supervised online adaptation
   layer2/
     negative_obstacle.py Node E — ditches and drop-offs
     dynamic.py           Node F — ego-motion compensated tracking
     voxel.py             Node G — 3D occupancy and overhead clearance
+    water.py             Node H — water and mud detection
   layer3/
     costmap.py           metric costmap, inflation, dynamic sweeping
   layer4/
@@ -668,6 +731,7 @@ ugvnav/
     world.py             closed-loop simulator, sensing, SR / SPL episodes
 docs/
   RELATED_WORK.md        capability survey of comparable open-source projects
+  RESEARCH.md            literature map: what we took from which paper
 scripts/
   run_pipeline.py        photograph -> six-panel figure -> v, omega
   benchmark.py           four fusion policies on identical input

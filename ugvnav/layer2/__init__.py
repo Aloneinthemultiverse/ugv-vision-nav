@@ -2,9 +2,11 @@
 from .negative_obstacle import NegativeObstacleDetector, NegativeObstacleResult
 from .dynamic import DynamicTracker, DynamicResult, Track
 from .voxel import VoxelGrid
+from .water import WaterDetector, WaterResult
 
 __all__ = [
     "NegativeObstacleDetector", "NegativeObstacleResult",
     "DynamicTracker", "DynamicResult", "Track",
     "VoxelGrid",
+    "WaterDetector", "WaterResult",
 ]

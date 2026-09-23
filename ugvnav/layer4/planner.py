@@ -212,11 +212,35 @@ class PurePursuit:
     """
 
     def __init__(self, lookahead: float = 1.2, v_nominal: float = 1.0,
-                 v_min: float = 0.2, w_max: float = 1.5) -> None:
+                 v_min: float = 0.2, w_max: float = 1.5,
+                 clutter_radius: float = 1.6, clutter_gain: float = 0.0) -> None:
         self.lookahead = float(lookahead)
         self.v_nominal = float(v_nominal)
         self.v_min = float(v_min)
         self.w_max = float(w_max)
+        self.clutter_radius = float(clutter_radius)
+        # Measured: scaling speed by clutter REGRESSED closed-loop success
+        # (easy 60% -> 52%, hard 4% -> 0%). Because omega = curvature * v in
+        # pure pursuit, slowing down also slows the turn, so the vehicle drives
+        # slowly into the obstacle instead of turning out of the way. Kept as an
+        # opt-in knob, default off, with the measurement recorded rather than
+        # the idea silently retained.
+        self.clutter_gain = float(clutter_gain)
+
+    def clutter(self, costmap: "Costmap", x: float, y: float) -> float:
+        """Fraction of the neighbourhood around (x, y) that is impassable.
+
+        Available for callers that want it, but disabled by default: see the
+        note on ``clutter_gain`` for the measurement that rejected it.
+        """
+        spec = costmap.spec
+        n = max(int(self.clutter_radius / spec.resolution), 1)
+        col, row = spec.world_to_cell(x, y)
+        c0 = max(int(col) - n, 0); c1 = min(int(col) + n + 1, spec.width)
+        r0 = max(int(row) - n, 0); r1 = min(int(row) + n + 1, spec.height)
+        if c1 <= c0 or r1 <= r0:
+            return 0.0
+        return float((costmap.grid[r0:r1, c0:c1] >= INSCRIBED).mean())
 
     def target(self, state: tuple[float, float, float],
                path: np.ndarray) -> np.ndarray | None:
@@ -259,6 +283,8 @@ class PurePursuit:
                 v = self.v_min
             elif c > 0:
                 v *= max(0.25, 1.0 - c / 255.0)
+            if self.clutter_gain > 0.0:
+                v *= max(0.3, 1.0 - self.clutter_gain * self.clutter(costmap, x, y))
 
         v = max(self.v_min, min(v, self.v_nominal))
         return Twist(v, float(np.clip(curvature * v, -self.w_max, self.w_max)))

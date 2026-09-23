@@ -145,6 +145,7 @@ def run_episode(world: World, seed: int = 0, dt: float = 0.15,
     spec = GridSpec(width=90, height=90, resolution=0.12, origin_x=-5.4, origin_y=0.0)
     control = PurePursuit(lookahead=1.1, v_nominal=1.1, v_min=0.2)
     memory = PersistentMap(resolution=0.15, hits_to_occupy=3.0, decay=0.93)
+    stuck = 0
 
     start = np.array([veh.x, veh.y])
     shortest = float(np.linalg.norm(np.array(world.goal) - start))
@@ -179,9 +180,18 @@ def run_episode(world: World, seed: int = 0, dt: float = 0.15,
             gx = float(np.clip(gx, spec.origin_x + 0.4,
                                spec.origin_x + spec.width * spec.resolution - 0.4))
             local = AStarPlanner(cm).plan((0.0, 0.3), (gx, max(gy, 0.5)))
-            if local.size == 0:                 # blocked: back off and re-look
-                veh.step(-0.4, 0.5, dt, rng)
+            if local.size == 0:
+                # Recovery, following the Nav2 pattern: a plan failing usually
+                # means the goal is outside a narrow field of view, not that the
+                # world is blocked. Rotating widens what we can see; reversing
+                # blindly drives into ground we have never observed.
+                stuck += 1
+                veh.step(0.0, 0.9 if (stuck // 4) % 2 == 0 else -0.9, dt, rng)
+                if stuck > 40:
+                    return EpisodeResult(False, False, True, length, shortest,
+                                         step, np.array(traj))
                 continue
+            stuck = 0
             # local (vehicle) frame -> world.  Vehicle frame: +Y forward,
             # +X right, rotated by theta about Z.
             c_t, s_t = np.cos(veh.theta), np.sin(veh.theta)
@@ -198,7 +208,7 @@ def run_episode(world: World, seed: int = 0, dt: float = 0.15,
             cmd, _ = MPPIPlanner(cm, horizon=16, dt=dt, samples=260,
                                  v_max=1.1, seed=seed + step).plan((0.0, 0.3, 0.0), ref)
         else:
-            cmd = control.step(veh.pose, path)
+                cmd = control.step(veh.pose, path, costmap=cm)
         if cmd.linear <= 0.0 and abs(cmd.angular) <= 0.0:
             path = np.empty((0, 2))
             continue

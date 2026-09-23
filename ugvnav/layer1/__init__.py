@@ -5,6 +5,7 @@ from .semantics import SemanticSegmenter, StubSegmenter, TERRAIN_CLASSES, traver
 from .uncertainty import UncertaintyEstimator
 from .odometry import VisualOdometry, estimate_relative_pose, PoseDelta
 from .localization import PoseFilter, LoopClosureDetector, PoseGraph, wrap_angle
+from .selfsup import SelfSupervisedTraversability, patch_features, Prototype
 
 __all__ = [
     "MonocularDepth", "StubDepth", "to_metric",
@@ -13,4 +14,5 @@ __all__ = [
     "UncertaintyEstimator",
     "VisualOdometry", "estimate_relative_pose", "PoseDelta",
     "PoseFilter", "LoopClosureDetector", "PoseGraph", "wrap_angle",
+    "SelfSupervisedTraversability", "patch_features", "Prototype",
 ]

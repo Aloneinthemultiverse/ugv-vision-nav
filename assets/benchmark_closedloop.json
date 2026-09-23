@@ -3,71 +3,19 @@
   "full": {
     "easy": {
       "episodes": 25,
-      "sr": 0.6,
-      "spl": 0.547600531825854,
-      "collisions": 10,
-      "timeouts": 0,
-      "mean_path_m": 14.8
-    },
-    "medium": {
-      "episodes": 25,
-      "sr": 0.32,
-      "spl": 0.28784120179105555,
-      "collisions": 17,
-      "timeouts": 0,
-      "mean_path_m": 12.6
-    },
-    "hard": {
-      "episodes": 25,
-      "sr": 0.04,
-      "spl": 0.03482867491358038,
-      "collisions": 24,
-      "timeouts": 0,
-      "mean_path_m": 9.07
-    }
-  },
-  "no_memory": {
-    "easy": {
-      "episodes": 25,
       "sr": 0.52,
-      "spl": 0.5176599415158861,
+      "spl": 0.4783456781659373,
       "collisions": 12,
       "timeouts": 0,
-      "mean_path_m": 11.61
+      "mean_path_m": 15.51
     },
     "medium": {
       "episodes": 25,
       "sr": 0.24,
-      "spl": 0.24,
+      "spl": 0.2300588493251366,
       "collisions": 19,
       "timeouts": 0,
-      "mean_path_m": 8.82
-    },
-    "hard": {
-      "episodes": 25,
-      "sr": 0.04,
-      "spl": 0.04,
-      "collisions": 24,
-      "timeouts": 0,
-      "mean_path_m": 5.65
-    }
-  },
-  "mppi": {
-    "easy": {
-      "episodes": 25,
-      "sr": 0.28,
-      "spl": 0.28,
-      "collisions": 18,
-      "timeouts": 0,
-      "mean_path_m": 9.76
-    },
-    "medium": {
-      "episodes": 25,
-      "sr": 0.16,
-      "spl": 0.15435183849967016,
-      "collisions": 21,
-      "timeouts": 0,
-      "mean_path_m": 7.79
+      "mean_path_m": 12.33
     },
     "hard": {
       "episodes": 25,
@@ -75,7 +23,59 @@
       "spl": 0.0,
       "collisions": 25,
       "timeouts": 0,
-      "mean_path_m": 4.47
+      "mean_path_m": 8.54
+    }
+  },
+  "no_memory": {
+    "easy": {
+      "episodes": 25,
+      "sr": 0.4,
+      "spl": 0.4,
+      "collisions": 15,
+      "timeouts": 0,
+      "mean_path_m": 11.05
+    },
+    "medium": {
+      "episodes": 25,
+      "sr": 0.24,
+      "spl": 0.24,
+      "collisions": 19,
+      "timeouts": 0,
+      "mean_path_m": 9.0
+    },
+    "hard": {
+      "episodes": 25,
+      "sr": 0.04,
+      "spl": 0.04,
+      "collisions": 24,
+      "timeouts": 0,
+      "mean_path_m": 5.26
+    }
+  },
+  "mppi": {
+    "easy": {
+      "episodes": 25,
+      "sr": 0.36,
+      "spl": 0.35701690437031103,
+      "collisions": 16,
+      "timeouts": 0,
+      "mean_path_m": 10.42
+    },
+    "medium": {
+      "episodes": 25,
+      "sr": 0.16,
+      "spl": 0.15435183849967016,
+      "collisions": 21,
+      "timeouts": 0,
+      "mean_path_m": 7.86
+    },
+    "hard": {
+      "episodes": 25,
+      "sr": 0.04,
+      "spl": 0.035569402326263926,
+      "collisions": 24,
+      "timeouts": 0,
+      "mean_path_m": 4.84
     }
   }
 }
