@@ -1,0 +1,57 @@
+scene,method,lethal_px,lethal_cells,route,path_m,unsafe_steps_vs_ours,v,w
+scene00.jpg,A semantic-only,184484,927,1,13.9,0,0.3,0.47
+scene00.jpg,B geometry-only,135874,918,1,13.84,0,0.32,0.45
+scene00.jpg,C semantic AND geometry,127269,665,1,13.84,0,0.32,0.45
+scene00.jpg,D ours,193170,1180,1,13.9,0,0.3,0.47
+scene01.jpg,A semantic-only,28391,0,1,8.74,44,0.91,0.06
+scene01.jpg,B geometry-only,95064,1947,1,9.93,0,0.68,-0.21
+scene01.jpg,C semantic AND geometry,28390,0,1,8.74,44,0.91,0.06
+scene01.jpg,D ours,95065,1947,1,9.93,0,0.68,-0.21
+scene02.jpg,A semantic-only,336766,2593,1,11.04,0,0.34,-0.44
+scene02.jpg,B geometry-only,270715,1261,1,8.99,27,0.91,0.06
+scene02.jpg,C semantic AND geometry,270715,1261,1,8.99,27,0.91,0.06
+scene02.jpg,D ours,336766,2593,1,11.04,0,0.34,-0.44
+scene03.jpg,A semantic-only,177086,343,1,9.36,14,0.68,0.21
+scene03.jpg,B geometry-only,193530,979,1,11.18,0,0.31,-0.46
+scene03.jpg,C semantic AND geometry,175481,343,1,9.36,14,0.68,0.21
+scene03.jpg,D ours,195135,979,1,11.18,0,0.31,-0.46
+scene04.jpg,A semantic-only,82764,76,1,8.74,0,0.91,0.06
+scene04.jpg,B geometry-only,96220,380,1,8.74,0,0.91,0.06
+scene04.jpg,C semantic AND geometry,76866,20,1,8.74,0,0.91,0.06
+scene04.jpg,D ours,102118,435,1,8.74,0,0.91,0.06
+scene05.jpg,A semantic-only,242373,752,1,8.74,0,0.91,0.06
+scene05.jpg,B geometry-only,232222,615,1,8.74,0,0.91,0.06
+scene05.jpg,C semantic AND geometry,232000,614,1,8.74,0,0.91,0.06
+scene05.jpg,D ours,243993,753,1,8.74,0,0.91,0.06
+scene06.jpg,A semantic-only,176309,1271,1,9.65,11,0.91,0.06
+scene06.jpg,B geometry-only,162642,921,1,9.28,7,0.91,0.06
+scene06.jpg,C semantic AND geometry,161706,907,1,9.28,7,0.91,0.06
+scene06.jpg,D ours,179216,1425,1,12.56,0,0.36,0.42
+scene07.jpg,A semantic-only,256573,1206,1,9.16,13,0.91,0.06
+scene07.jpg,B geometry-only,239365,985,1,9.24,16,0.91,0.06
+scene07.jpg,C semantic AND geometry,238180,976,1,9.24,16,0.91,0.06
+scene07.jpg,D ours,259448,1461,1,12.7,0,0.36,-0.43
+scene08.jpg,A semantic-only,258625,1384,1,9.16,0,0.91,0.06
+scene08.jpg,B geometry-only,240404,1118,1,9.07,0,0.91,0.06
+scene08.jpg,C semantic AND geometry,238556,1118,1,9.07,0,0.91,0.06
+scene08.jpg,D ours,260473,1384,1,9.16,0,0.91,0.06
+scene09.jpg,A semantic-only,252909,1272,1,9.52,0,0.39,0.4
+scene09.jpg,B geometry-only,247412,1301,1,9.52,0,0.39,0.4
+scene09.jpg,C semantic AND geometry,244795,1271,1,9.52,0,0.39,0.4
+scene09.jpg,D ours,255526,1302,1,9.52,0,0.39,0.4
+scene10.jpg,A semantic-only,244554,1630,0,0.0,0,0.0,0.0
+scene10.jpg,B geometry-only,231812,1603,0,0.0,0,0.0,0.0
+scene10.jpg,C semantic AND geometry,228471,1583,0,0.0,0,0.0,0.0
+scene10.jpg,D ours,247895,1649,0,0.0,0,0.0,0.0
+scene11.jpg,A semantic-only,237404,1819,1,10.59,0,0.29,0.47
+scene11.jpg,B geometry-only,186612,1511,1,8.98,5,0.91,-0.06
+scene11.jpg,C semantic AND geometry,184266,1509,1,8.98,5,0.91,-0.06
+scene11.jpg,D ours,239750,1821,1,10.59,0,0.29,0.47
+scene12.jpg,A semantic-only,15906,16,1,8.74,0,0.91,0.06
+scene12.jpg,B geometry-only,21446,134,1,8.74,0,0.91,0.06
+scene12.jpg,C semantic AND geometry,15904,16,1,8.74,0,0.91,0.06
+scene12.jpg,D ours,21448,134,1,8.74,0,0.91,0.06
+scene13.jpg,A semantic-only,201771,3517,1,7.91,0,0.29,-0.47
+scene13.jpg,B geometry-only,87074,1506,1,9.28,64,0.68,0.21
+scene13.jpg,C semantic AND geometry,86999,1505,1,9.28,64,0.68,0.21
+scene13.jpg,D ours,207798,3592,1,7.91,0,0.29,-0.47

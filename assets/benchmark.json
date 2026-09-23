@@ -1,0 +1,58 @@
+{
+  "summary": {
+    "A semantic-only": {
+      "routes": 13,
+      "of": 14,
+      "mean_path_m": 9.63,
+      "unsafe_steps": 82,
+      "mean_lethal_pct": 14.8
+    },
+    "B geometry-only": {
+      "routes": 13,
+      "of": 14,
+      "mean_path_m": 9.66,
+      "unsafe_steps": 119,
+      "mean_lethal_pct": 13.4
+    },
+    "C semantic AND geometry": {
+      "routes": 13,
+      "of": 14,
+      "mean_path_m": 9.42,
+      "unsafe_steps": 177,
+      "mean_lethal_pct": 10.4
+    },
+    "D ours": {
+      "routes": 13,
+      "of": 14,
+      "mean_path_m": 10.36,
+      "unsafe_steps": 0,
+      "mean_lethal_pct": 18.2
+    }
+  },
+  "confusion": {
+    "A semantic-only": {
+      "A semantic-only": 0,
+      "B geometry-only": 58,
+      "C semantic AND geometry": 0,
+      "D ours": 82
+    },
+    "B geometry-only": {
+      "A semantic-only": 102,
+      "B geometry-only": 0,
+      "C semantic AND geometry": 0,
+      "D ours": 119
+    },
+    "C semantic AND geometry": {
+      "A semantic-only": 102,
+      "B geometry-only": 58,
+      "C semantic AND geometry": 0,
+      "D ours": 177
+    },
+    "D ours": {
+      "A semantic-only": 0,
+      "B geometry-only": 0,
+      "C semantic AND geometry": 0,
+      "D ours": 0
+    }
+  }
+}
