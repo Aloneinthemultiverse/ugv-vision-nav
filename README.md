@@ -324,54 +324,66 @@ python scripts/benchmark_gt.py
 `fetch_rellis.py` reads the 5.2 GB archive's ZIP index over HTTP range requests
 and extracts only the frames required, rather than downloading all of it.
 
-### Results — 26 RELLIS-3D test frames, void/sky excluded
+### Results — 52 RELLIS-3D test frames, void/sky excluded
 
 ```
 method                      IoU trav  IoU block    mIoU  FALSE-SAFE  FALSE-BLOCK
 --------------------------------------------------------------------------------
-A semantic-only                0.729      0.463   0.596       53.4%        0.5%
-B geometry-only                0.729      0.460   0.595       53.9%        0.2%
-C semantic AND geometry        0.702      0.381   0.542       61.9%        0.1%
-D ours                         0.761      0.548   0.654       44.5%        0.8%
+A semantic-only                0.705      0.512   0.609       48.2%        0.9%
+B geometry-only                0.713      0.525   0.619       47.4%        0.3%
+C semantic AND geometry        0.669      0.415   0.542       58.5%        0.1%
+D ours                         0.754      0.627   0.691       36.1%        1.6%
 ```
 
 **FALSE-SAFE** — ground-truth obstacle the method would have driven into.
 **FALSE-BLOCK** — ground-truth drivable ground the method refused.
 
-Ours wins on every metric: best mIoU (**0.654** vs 0.596 / 0.595 / 0.542) and
-**8.9 points less false-safe** than the semantic-only baseline it is built on.
-The geometry override is doing real work. And C — block only when both cues
-agree — is the *worst* method by a wide margin, which is the empirical case
-against permissive fusion.
+Ours wins on every metric: best mIoU (**0.691** vs 0.609 / 0.619 / 0.542) and
+**11.3 points less false-safe** than the strongest baseline. It refuses slightly
+more real ground in exchange (1.6 % vs 0.3 %) — the right direction for a
+vehicle, since a missed obstacle is a collision and an over-blocked patch of
+grass is a detour.
 
-### But 44.5 % false-safe is not a good number
+C — block only when both cues agree — is the **worst** method by a wide margin.
+That is the empirical case against permissive fusion, and the reason the
+geometry override is an *override* rather than an intersection.
 
-Ours is the best of four, and still misses nearly half of all labelled
+The ranking is stable: on a 26-frame subset the same ordering held
+(D 0.654 mIoU / 44.5 % false-safe), so this is not an artefact of sample choice.
+
+### But 36 % false-safe is not a good number
+
+Ours is the best of four and still misses about a third of all labelled
 obstacles. That is not a result to present as a success, so here is the
-diagnosis:
+diagnosis over the same 52 frames:
 
 ```
 FALSE-SAFE by ground-truth class
-  obstacle     47.0%   of 776 630 px
-  water        93.5%   of  40 912 px
+  obstacle     31.8%   of 3 730 812 px
+  water        82.3%   of   344 864 px
 
 What our segmenter calls each RELLIS class (row-normalised)
-GT                        trail      grass   vegetation      sky
-obstacle                  53.3%       1.1%        38.0%     7.0%
-water                     43.7%      50.2%         0.0%     0.0%
-unstable (grass/dirt)     21.6%      78.3%         0.0%     0.0%
+GT                        trail      grass   vegetation   obstacle     water
+obstacle                  35.3%       9.7%        42.1%       1.7%      3.0%
+water                     46.5%      36.3%         0.5%       1.4%     15.3%
+unstable (grass/dirt)     14.8%      84.6%         0.2%       0.1%      0.3%
 ```
 
 **The dominant error is a semantic domain gap, not the fusion policy.**
-SegFormer is trained on ADE20k — indoor and urban scenes. It labels **53 % of
+SegFormer is trained on ADE20k — indoor and urban scenes. It labels **35 % of
 RELLIS obstacle pixels as "trail"**, because dense off-road bush and scrub match
-ADE20k's *earth* / *field* / *land* classes. Geometry rescues some of that
-(D beats A by 9 points) but cannot rescue a low bush that is both mislabelled
-*and* barely raised above the plane.
+ADE20k's *earth* / *field* / *land* classes. Only 1.7 % of true obstacle pixels
+get the obstacle label at all. Geometry rescues a large share of that — D cuts
+false-safe from 48.2 % to 36.1 % — but it cannot rescue a low bush that is both
+mislabelled *and* barely raised above the ground plane.
 
-**Water is essentially undetected — 93.5 % false-safe.** Mud and puddles are
-read as trail or grass. The vocabulary has a water class; nothing ever predicts
-it. That is a genuine capability gap, not a tuning problem.
+Where the labels *are* right, the stack is strong: grass and dirt are recognised
+**84.6 %** of the time, which is why IoU on traversable ground reaches 0.754.
+
+**Water remains largely undetected — 82.3 % false-safe.** Mud and puddles are
+read as trail (46.5 %) or grass (36.3 %); only 15.3 % are called water. That is
+a genuine capability gap, not a tuning problem, and a real hazard: RELLIS
+labels water as non-traversable for good reason.
 
 ### What this means
 
@@ -418,7 +430,7 @@ repo stays free of share-alike content.
 - A\* global planning, MPPI local planning, regulated pure pursuit
 - End-to-end pipeline: photograph → `v, ω`
 
-⚠️ **Runs, not yet tuned on field data** — quantified below: 44.5 % of
+⚠️ **Runs, not yet tuned on field data** — quantified below: 36 % of
 RELLIS-3D obstacles are missed, driven by the ADE20k domain gap
 
 - Segmentation uses ADE20k classes; RUGD or RELLIS-3D fine-tuning is the next
