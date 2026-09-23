@@ -642,14 +642,74 @@ difficulty definition, and theirs is on real hardware while ours is a benchmark
 we wrote ourselves — the weaker form of evidence. Recorded so the gap is visible
 rather than implied.
 
-### Water detection
+### Water detection - measured, and it fails
 
-Han et al. (ECCV 2018) report that FCN-8s with Reflection Attention Units beats
-FCN-8s, DeepLab V2 and a GMM baseline on their ONR and OFR datasets, but the
-numeric tables are not in any openly reachable version we could retrieve, and
-there is no public implementation. Our detector therefore has **no published
-baseline to be measured against**, and its RELLIS water recall has not yet been
-re-measured since it was added. That is an open item, not a result.
+The detector has now been evaluated on RELLIS-3D water labels
+(`scripts/benchmark_water.py`, 52 frames, 38 containing water):
+
+| Config | Recall | Precision | FP on drivable |
+|---|---|---|---|
+| threshold 0.45 (best) | 5.5 % | 11.9 % | 0.9 % |
+| threshold 0.55 (default) | 0.6 % | 20.2 % | 0.1 % |
+| **semantic-only baseline it was written to beat** | **17.7 %** | — | — |
+
+**It is about three times worse than the baseline.** It is therefore **not
+wired into the pipeline or the fusion layer**, and will not be until it clears
+17.7 % recall.
+
+The failure is instructive. Its unit tests pass because the synthetic puddle
+they use is smooth, blue and sky-reflecting - a puddle on tarmac. RELLIS
+"withwater" is dominated by **mud**: brown, textured, in shallow depressions,
+reflecting nothing. The sky-chroma cue does not merely weaken there, it points
+the wrong way, and the smoothness cue is weak because wet soil keeps its
+texture. **The tests were validating an assumption rather than reality.**
+
+Fixing it needs mud-specific cues - darkness relative to surrounding soil,
+wetness saturation, position in terrain depressions - not tuning these three.
+
+Han et al. (ECCV 2018) report RAUs beating FCN-8s, DeepLab V2 and GMM on their
+ONR/OFR datasets, but the numeric tables are not in any openly reachable version
+we could retrieve and there is no public implementation, so there is still no
+published number to compare against.
+
+
+---
+
+## Dataset coverage - what has and has not been validated on real data
+
+Most of the 178 tests assert against **synthetic ground truth**, which verifies
+the mathematics but not the assumptions. Where a component has been checked
+against real data, that is stated; where it has not, that is stated too.
+
+| Component | Synthetic tests | Real data | Cross-dataset |
+|---|---|---|---|
+| camera, elevation, voxel, uncertainty | ✅ | indirect only | ❌ |
+| semantics + costmap fusion | ✅ | ✅ RELLIS-3D, 52 frames | ❌ |
+| negative obstacles | ✅ | ⚠️ visual inspection, no ground truth | ❌ |
+| **water** | ✅ | ✅ **and it fails — see above** | ❌ |
+| **self-supervised adapter** | ✅ | ❌ **never run on real data** | ❌ |
+| **visual odometry, localization** | ✅ | ❌ **no real sequence exists here** | ❌ |
+| **dynamic obstacles** | ✅ | ❌ **needs video; all our frames are stills** | ❌ |
+| closed-loop navigation | synthetic worlds | ❌ | ❌ |
+
+Two real sources in total — 52 RELLIS-3D frames and 14 Wikimedia photographs —
+and **no cross-dataset validation at all**. Odometry, dynamic tracking and voxel
+mapping all consume image *sequences*, and every real frame available here is a
+standalone still, so three components are structurally untestable on the data we
+have.
+
+The water result is the concrete argument for why this matters: it passed every
+synthetic test and then failed by 3x on the first real measurement. Any
+component in the "never run on real data" rows should be read with that in mind.
+
+**Highest-value next steps, in order:**
+
+1. Obtain an image *sequence* (RELLIS is published as ROS bags) to test
+   odometry, dynamic tracking and voxel mapping at all.
+2. Add RUGD as a second dataset for genuine cross-dataset validation; the
+   5-label test split is a 209 MB download.
+3. Evaluate the self-supervised adapter on real terrain before trusting it.
+4. Rebuild water detection around mud cues, or drop the claim.
 
 
 ---
@@ -801,6 +861,7 @@ scripts/
   benchmark.py           four fusion policies on identical input
   benchmark_gt.py        scored against RELLIS-3D human labels
   benchmark_closedloop.py  does the vehicle arrive? SR / SPL
+  benchmark_water.py     water detector vs RELLIS water labels
   fetch_rellis.py        pulls RELLIS test frames from a remote zip
 data/offroad/            14 CC-licensed outdoor scenes + SOURCES.json
 tests/                   95 tests against synthetic ground truth

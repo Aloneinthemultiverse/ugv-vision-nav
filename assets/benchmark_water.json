@@ -1,0 +1,46 @@
+{
+  "threshold 0.45": {
+    "recall": 0.0545,
+    "precision": 0.119,
+    "fp_on_traversable": 0.0089,
+    "tp": 18800,
+    "fp": 139153,
+    "fn": 326064,
+    "fp_trav": 43172,
+    "gt_water": 344864,
+    "gt_trav": 4833302
+  },
+  "threshold 0.55 (default)": {
+    "recall": 0.0059,
+    "precision": 0.2018,
+    "fp_on_traversable": 0.0006,
+    "tp": 2028,
+    "fp": 8020,
+    "fn": 342836,
+    "fp_trav": 2796,
+    "gt_water": 344864,
+    "gt_trav": 4833302
+  },
+  "threshold 0.65": {
+    "recall": 0.0005,
+    "precision": 0.3321,
+    "fp_on_traversable": 0.0,
+    "tp": 173,
+    "fp": 348,
+    "fn": 344691,
+    "fp_trav": 82,
+    "gt_water": 344864,
+    "gt_trav": 4833302
+  },
+  "0.45, no height gate": {
+    "recall": 0.0545,
+    "precision": 0.0436,
+    "fp_on_traversable": 0.0104,
+    "tp": 18800,
+    "fp": 411916,
+    "fn": 326064,
+    "fp_trav": 50500,
+    "gt_water": 344864,
+    "gt_trav": 4833302
+  }
+}

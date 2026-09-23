@@ -20,6 +20,30 @@ directly as physics rather than learning them:
 
 Each cue alone is weak and produces false positives on shadow or smooth rock.
 Combined, and restricted to the ground region, they are usable.
+
+STATUS: EXPERIMENTAL - DOES NOT WORK ON REAL DATA YET
+-----------------------------------------------------
+Measured against RELLIS-3D water labels (52 frames, 38 containing water) by
+``scripts/benchmark_water.py``:
+
+    threshold 0.45 (best)     recall  5.5 %   precision 11.9 %
+    threshold 0.55 (default)  recall  0.6 %   precision 20.2 %
+    semantic-only baseline    recall 17.7 %
+
+**It is roughly three times worse than the baseline it was written to beat.**
+It is therefore NOT wired into the pipeline or the fusion layer, and must not be
+until it clears 17.7 % recall.
+
+Why it fails, and why the unit tests did not catch it: the synthetic puddle in
+the tests is smooth, blue and sky-reflecting, which is what a puddle on tarmac
+looks like. RELLIS "withwater" is dominated by **mud** - brown, textured, in
+shallow depressions, reflecting nothing. The sky-chroma cue is not merely weak
+there, it points the wrong way, and the smoothness cue is weak because wet soil
+keeps its texture.
+
+Fixing this needs mud-specific cues (darkness relative to surrounding soil,
+saturation increase from wetness, position in terrain depressions) rather than
+tuning these three. The tests were validating an assumption, not reality.
 """
 from __future__ import annotations
 
